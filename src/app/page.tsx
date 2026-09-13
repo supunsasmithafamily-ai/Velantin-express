@@ -540,13 +540,22 @@ function LivePage({ netState, emit, user, setPage, setThreadChatId, goToLive }: 
   const previewStreamRef = useRef<MediaStream | null>(null)
   const [camStatus, setCamStatus] = useState<'loading' | 'ready' | 'blocked'>('loading')
   const [starting, setStarting] = useState(false)
+  const [startError, setStartError] = useState<string | null>(null)
+  const startTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   useEffect(() => {
     if (mine) {
+      setStarting(false)
+      setStartError(null)
+      if (startTimeoutRef.current) clearTimeout(startTimeoutRef.current)
       setPage('liveStage')
       setThreadChatId(null)
     }
   }, [mine?.id])
+
+  useEffect(() => () => {
+    if (startTimeoutRef.current) clearTimeout(startTimeoutRef.current)
+  }, [])
 
   // Start the camera preview immediately (full screen), before the user
   // even taps "Go live" — no title screen, no extra step in between.
@@ -600,11 +609,20 @@ function LivePage({ netState, emit, user, setPage, setThreadChatId, goToLive }: 
               disabled={starting}
               onClick={() => {
                 setStarting(true)
+                setStartError(null)
                 emit({ type: 'live_start', title: `${user.name} live` })
+                if (startTimeoutRef.current) clearTimeout(startTimeoutRef.current)
+                startTimeoutRef.current = setTimeout(() => {
+                  setStarting(false)
+                  setStartError('Could not connect to the live server. Check your connection and try again.')
+                }, 8000)
               }}
             >
               {starting ? 'Going live…' : '🔴 Go Live'}
             </button>
+            {startError && (
+              <div className="ve-badge" style={{ color: '#ff6b6b', maxWidth: '85vw', textAlign: 'center' }}>{startError}</div>
+            )}
 
             {netState.lives.length > 0 && (
               <div style={{ display: 'flex', gap: 10, overflowX: 'auto', maxWidth: '92vw', padding: '0 12px' }}>
