@@ -9,7 +9,7 @@ class_name = "AppRoom"
 
 [[migrations]]
 tag = "v1"
-new_classes = ["AppRoom"]
+new_sqlite_classes = ["AppRoom"]
 
 # Secrets (set with `wrangler secret put <NAME>`, NOT here):
 #   DATABASE_URL        — Neon Postgres connection string (same DB as the Vercel app)
