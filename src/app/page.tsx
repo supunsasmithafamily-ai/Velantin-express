@@ -535,8 +535,11 @@ function LivePage({ netState, emit, user, setPage, setThreadChatId, goToLive }: 
   setPage: (p: Page) => void; setThreadChatId: (id: string | null) => void
   goToLive: (liveId: string) => void
 }) {
-  const [title, setTitle] = useState('')
   const mine = netState.lives.find(l => l.hostId === user.id)
+  const videoRef = useRef<HTMLVideoElement>(null)
+  const previewStreamRef = useRef<MediaStream | null>(null)
+  const [camStatus, setCamStatus] = useState<'loading' | 'ready' | 'blocked'>('loading')
+  const [starting, setStarting] = useState(false)
 
   useEffect(() => {
     if (mine) {
@@ -545,36 +548,74 @@ function LivePage({ netState, emit, user, setPage, setThreadChatId, goToLive }: 
     }
   }, [mine?.id])
 
+  // Start the camera preview immediately (full screen), before the user
+  // even taps "Go live" — no title screen, no extra step in between.
+  useEffect(() => {
+    if (mine) return // already live — LiveStagePage handles the camera itself
+    let stop = false
+    ;(async () => {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: 'user', width: { ideal: 1280 }, height: { ideal: 720 } },
+          audio: true,
+        })
+        if (stop) { stream.getTracks().forEach(t => t.stop()); return }
+        previewStreamRef.current = stream
+        if (videoRef.current) {
+          videoRef.current.srcObject = stream
+          videoRef.current.muted = true
+          await videoRef.current.play().catch(() => {})
+        }
+        setCamStatus('ready')
+      } catch {
+        setCamStatus('blocked')
+      }
+    })()
+    return () => {
+      stop = true
+      previewStreamRef.current?.getTracks().forEach(t => t.stop())
+      previewStreamRef.current = null
+    }
+  }, [mine?.id])
+
   return (
-    <section className="ve-stage">
-      <div className="ve-topbar">
-        <strong>Valentine Express stage</strong>
-        <span className="ve-muted">WebRTC live</span>
-      </div>
-      <div style={{ padding: 20, display: 'grid', gap: 16 }}>
-        <div className="ve-panel">
-          <h2 style={{ marginTop: 0 }}>Go live</h2>
-          <p className="ve-muted">Your camera is sent to everyone who taps Watch.</p>
-          {mine ? (
-            <button className="ve-btn ve-btn-primary" onClick={() => { setPage('liveStage'); setThreadChatId(null) }}>Return to my live</button>
-          ) : (
-            <form onSubmit={e => {
-              e.preventDefault()
-              emit({ type: 'live_start', title: title || `${user.name} live` })
-            }}>
-              <input className="ve-field" placeholder="Room title" value={title} onChange={e => setTitle(e.target.value)} />
-              <button className="ve-btn ve-btn-primary" style={{ marginTop: 12 }} type="submit">Start live</button>
-            </form>
-          )}
-        </div>
-        <div className="ve-grid-2">
-          {netState.lives.map(l => (
-            <button key={l.id} className="ve-panel" style={{ textAlign: 'left' }} onClick={() => goToLive(l.id)}>
-              <div className="ve-badge"><span className="ve-live-dot" /> LIVE · {l.host}</div>
-              <h3>{l.title}</h3>
-              <p className="ve-muted">{l.viewers} watching</p>
+    <section className="ve-stage ve-live-fullscreen">
+      <div className="ve-live-frame ve-live-frame-full">
+        <video ref={videoRef} autoPlay playsInline muted style={{ width: '100%', height: '100%', objectFit: 'cover', background: '#000' }} />
+        <div className="ve-live-overlay">
+          <div className="ve-live-top">
+            <button className="ve-icon-btn" aria-label="Back" onClick={() => setPage('home')}>←</button>
+            <div className="ve-badge">
+              {camStatus === 'loading' && 'Starting camera…'}
+              {camStatus === 'ready' && 'Camera ready'}
+              {camStatus === 'blocked' && 'Camera blocked — check permissions'}
+            </div>
+            <div />
+          </div>
+
+          <div style={{ position: 'absolute', left: 0, right: 0, bottom: 28, display: 'grid', placeItems: 'center', gap: 14 }}>
+            <button
+              className="ve-btn ve-btn-primary"
+              style={{ padding: '16px 40px', fontSize: 16, borderRadius: 999 }}
+              disabled={starting}
+              onClick={() => {
+                setStarting(true)
+                emit({ type: 'live_start', title: `${user.name} live` })
+              }}
+            >
+              {starting ? 'Going live…' : '🔴 Go Live'}
             </button>
-          ))}
+
+            {netState.lives.length > 0 && (
+              <div style={{ display: 'flex', gap: 10, overflowX: 'auto', maxWidth: '92vw', padding: '0 12px' }}>
+                {netState.lives.map(l => (
+                  <button key={l.id} className="ve-badge" style={{ whiteSpace: 'nowrap' }} onClick={() => goToLive(l.id)}>
+                    <span className="ve-live-dot" /> {l.host} · {l.viewers} watching
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
       </div>
     </section>
