@@ -1,7 +1,7 @@
 /* eslint-disable react-hooks/static-components */
 'use client'
 
-import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
+import { useState, useEffect, useRef, useCallback, useMemo, Component, type ReactNode } from 'react'
 import { connectSocket, disconnectSocket } from '@/lib/socket'
 import { authFetch, setToken, clearToken, getToken } from '@/lib/auth-client'
 import { uploadImageDirect } from '@/lib/cloudinary-client'
@@ -1765,7 +1765,43 @@ type NetState = {
 
 // ============ MAIN APP ============
 
-export default function Home() {
+// Catches render/runtime crashes anywhere in the app and shows the exact
+// error message + component stack on-screen instead of a blank "Application
+// error" page — makes bugs debuggable on a phone with no devtools access.
+class AppErrorBoundary extends Component<{ children: ReactNode }, { error: Error | null; info: string }> {
+  constructor(props: { children: ReactNode }) {
+    super(props)
+    this.state = { error: null, info: '' }
+  }
+  static getDerivedStateFromError(error: Error) {
+    return { error }
+  }
+  componentDidCatch(error: Error, info: { componentStack: string }) {
+    this.setState({ info: info.componentStack })
+    console.error('[AppErrorBoundary]', error, info)
+  }
+  render() {
+    if (this.state.error) {
+      return (
+        <div style={{ padding: 20, background: '#2a0a12', color: '#fdeef1', minHeight: '100vh', fontFamily: 'monospace', fontSize: 13, whiteSpace: 'pre-wrap' }}>
+          <h2 style={{ color: '#ff6b6b' }}>App crashed — copy this and send it back:</h2>
+          <p><strong>{this.state.error.name}: {this.state.error.message}</strong></p>
+          <p style={{ opacity: 0.8 }}>{this.state.error.stack}</p>
+          <p style={{ opacity: 0.6, marginTop: 16 }}>Component stack:{this.state.info}</p>
+          <button
+            style={{ marginTop: 16, padding: '10px 20px', background: '#e11d48', color: '#fff', border: 'none', borderRadius: 8 }}
+            onClick={() => { this.setState({ error: null, info: '' }); window.location.href = '/' }}
+          >
+            Reload app
+          </button>
+        </div>
+      )
+    }
+    return this.props.children
+  }
+}
+
+function HomeInner() {
   const [page, setPage] = useState<Page>('landing')
   const [user, setUser] = useState<AuthUser | null>(null)
   const [authError, setAuthError] = useState('')
@@ -2090,5 +2126,13 @@ export default function Home() {
       {showDailyBonus && <DailyBonusModal onClaimed={() => handleSetUser('refresh')} />}
       <PushToast toasts={pushToasts} onDismiss={id => setPushToasts(t => t.filter(x => x.id !== id))} />
     </div>
+  )
+}
+
+export default function Home() {
+  return (
+    <AppErrorBoundary>
+      <HomeInner />
+    </AppErrorBoundary>
   )
 }
