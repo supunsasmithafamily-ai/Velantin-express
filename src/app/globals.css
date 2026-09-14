@@ -36,20 +36,20 @@
 
 /* === Valentine Express Theme === */
 :root {
-  --ve-bg: #fff5f6;
-  --ve-bg-2: #ffe8ec;
-  --ve-surface: #ffffff;
-  --ve-surface-2: #fff0f3;
-  --ve-line: #ffd3db;
-  --ve-text: #4a1420;
-  --ve-muted: #a9707c;
+  --ve-bg: #2a0a12;
+  --ve-bg-2: #3d0f1c;
+  --ve-surface: #40121f;
+  --ve-surface-2: #4a1524;
+  --ve-line: #6b2536;
+  --ve-text: #fdeef1;
+  --ve-muted: #d8a3af;
   --ve-rose: #e11d48;
   --ve-rose-2: #fb7185;
-  --ve-wine: #be123c;
+  --ve-wine: #9f1239;
   --ve-live: #ff2d55;
-  --ve-ok: #16a34a;
-  --ve-warn: #d97706;
-  --ve-shadow: 0 16px 48px rgba(225, 29, 72, 0.14);
+  --ve-ok: #22c55e;
+  --ve-warn: #f59e0b;
+  --ve-shadow: 0 16px 48px rgba(0, 0, 0, 0.45);
   --ve-radius: 18px;
 }
 
