@@ -1889,7 +1889,10 @@ function HomeInner() {
       }
     })
     s.on('disconnect', () => setNetState(n => ({ ...n, connected: false })))
-    s.on('error', (err: string) => setNetState(n => ({ ...n, error: err })))
+    s.on('error', (err: unknown) => {
+      const message = typeof err === 'string' ? err : (err && typeof err === 'object' && 'error' in err ? String((err as { error: unknown }).error) : 'Something went wrong')
+      setNetState(n => ({ ...n, error: message }))
+    })
 
     s.on('snapshot', (data: any) => {
       setNetState(n => ({
