@@ -51,8 +51,12 @@ const GIFT_CATALOG = [
 
 const COIN_PACKS = [
   { id: 'starter', coins: 100, price: 0.99, priceLabel: '$0.99' },
+  { id: 'basic', coins: 250, price: 2.49, priceLabel: '$2.49' },
   { id: 'plus', coins: 500, price: 4.99, priceLabel: '$4.99' },
+  { id: 'value', coins: 800, price: 7.49, priceLabel: '$7.49' },
   { id: 'pro', coins: 1200, price: 9.99, priceLabel: '$9.99' },
+  { id: 'mega', coins: 2500, price: 19.99, priceLabel: '$19.99' },
+  { id: 'ultimate', coins: 6500, price: 49.99, priceLabel: '$49.99' },
 ]
 
 const DIAMONDS_PER_USD = 200
@@ -255,7 +259,7 @@ function Shell({ page, setPage, threadChatId, setThreadChatId, user, setUser, ne
           <div className="ve-side-head">
             <div>
               <h1>Chats</h1>
-              <p>{user.name} · {netState.users.length} online</p>
+              <p>{netState.users.length - 1} others online</p>
             </div>
           </div>
           <div className="ve-list ve-scroll">
@@ -431,7 +435,7 @@ function HomePage({ netState, user, emit, goToLive, goToProfile }: {
         <div>
           <h3 style={{ marginTop: 0 }}>People</h3>
           <div className="ve-user-grid">
-            {allUsers.map(u => {
+            {allUsers.filter(u => u.id !== user.id).map(u => {
               const online = onlineIds.has(u.id)
               const liveId = liveByHost.get(u.id)
               return (
@@ -620,8 +624,8 @@ function LivePage({ netState, emit, user, setPage, setThreadChatId, goToLive }: 
             >
               {starting ? 'Going live…' : '🔴 Go Live'}
             </button>
-            {startError && (
-              <div className="ve-badge" style={{ color: '#ff6b6b', maxWidth: '85vw', textAlign: 'center' }}>{startError}</div>
+            {(startError || netState.error) && (
+              <div className="ve-badge" style={{ color: '#ff6b6b', maxWidth: '85vw', textAlign: 'center' }}>{startError || netState.error}</div>
             )}
 
             {netState.lives.length > 0 && (
