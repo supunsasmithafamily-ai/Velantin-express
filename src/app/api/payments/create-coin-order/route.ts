@@ -5,8 +5,12 @@ import { requireUser, isNextResponse } from '@/lib/session';
 
 const COIN_PACKS: Record<string, { coins: number; price: number }> = {
   starter: { coins: 100, price: 0.99 },
+  basic: { coins: 250, price: 2.49 },
   plus: { coins: 500, price: 4.99 },
+  value: { coins: 800, price: 7.49 },
   pro: { coins: 1200, price: 9.99 },
+  mega: { coins: 2500, price: 19.99 },
+  ultimate: { coins: 6500, price: 49.99 },
 };
 
 export async function POST(request: NextRequest) {
@@ -28,7 +32,7 @@ export async function POST(request: NextRequest) {
     const pack = COIN_PACKS[packId];
     if (!pack) {
       return NextResponse.json(
-        { error: 'Invalid packId. Must be one of: starter, plus, pro' },
+        { error: `Invalid packId. Must be one of: ${Object.keys(COIN_PACKS).join(', ')}` },
         { status: 400 },
       );
     }
