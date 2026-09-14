@@ -296,7 +296,7 @@ function Shell({ page, setPage, threadChatId, setThreadChatId, user, setUser, ne
         {page === 'publicProfile' && <PublicProfilePage basicUser={viewingProfile} setPage={setPage} emit={emit} />}
         {page === 'chats' && <ChatsPlaceholder />}
         {page === 'thread' && threadChatId && <ThreadPage chatId={threadChatId} netState={netState} emit={emit} user={user} />}
-        {page === 'live' && <LivePage netState={netState} emit={emit} user={user} setPage={setPage} setThreadChatId={setThreadChatId} goToLive={goToLive} />}
+        {page === 'live' && <LivePage netState={netState} emit={emit} user={user} setPage={setPage} setThreadChatId={setThreadChatId} goToLive={goToLive} registerLive={registerLive} />}
         {page === 'liveStage' && <LiveStagePage netState={netState} emit={emit} user={user} setPage={setPage} />}
         {page === 'wallet' && <WalletPage user={user} setUser={setStatusMsg} />}
         {page === 'verify' && <VerifyPage user={user} setUser={setStatusMsg} />}
@@ -534,37 +534,20 @@ function PublicProfilePage({ basicUser, setPage, emit }: {
   )
 }
 
-function LivePage({ netState, emit, user, setPage, setThreadChatId, goToLive }: {
+function LivePage({ netState, user, setPage, setThreadChatId, goToLive, registerLive }: {
   netState: NetState; emit: (msg: Record<string, unknown>) => void; user: AuthUser
   setPage: (p: Page) => void; setThreadChatId: (id: string | null) => void
-  goToLive: (liveId: string) => void
+  goToLive: (liveId: string) => void; registerLive: (live: NetLive) => void
 }) {
-  const mine = netState.lives.find(l => l.hostId === user.id)
   const videoRef = useRef<HTMLVideoElement>(null)
   const previewStreamRef = useRef<MediaStream | null>(null)
   const [camStatus, setCamStatus] = useState<'loading' | 'ready' | 'blocked'>('loading')
   const [starting, setStarting] = useState(false)
   const [startError, setStartError] = useState<string | null>(null)
-  const startTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-
-  useEffect(() => {
-    if (mine) {
-      setStarting(false)
-      setStartError(null)
-      if (startTimeoutRef.current) clearTimeout(startTimeoutRef.current)
-      setPage('liveStage')
-      setThreadChatId(null)
-    }
-  }, [mine?.id])
-
-  useEffect(() => () => {
-    if (startTimeoutRef.current) clearTimeout(startTimeoutRef.current)
-  }, [])
 
   // Start the camera preview immediately (full screen), before the user
   // even taps "Go live" — no title screen, no extra step in between.
   useEffect(() => {
-    if (mine) return // already live — LiveStagePage handles the camera itself
     let stop = false
     ;(async () => {
       try {
@@ -589,7 +572,30 @@ function LivePage({ netState, emit, user, setPage, setThreadChatId, goToLive }: 
       previewStreamRef.current?.getTracks().forEach(t => t.stop())
       previewStreamRef.current = null
     }
-  }, [mine?.id])
+  }, [])
+
+  async function handleGoLive() {
+    setStarting(true)
+    setStartError(null)
+    try {
+      const res = await authFetch('/api/live/start', {
+        method: 'POST',
+        body: JSON.stringify({ title: `${user.name} live` }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || 'Could not start the live stream')
+      // Stop the local preview stream — LiveStagePage's Agora publish
+      // takes over the camera from here.
+      previewStreamRef.current?.getTracks().forEach(t => t.stop())
+      previewStreamRef.current = null
+      registerLive({ id: data.id, hostId: data.hostId, host: data.host, title: data.title, viewers: 0 })
+      setThreadChatId(null)
+      goToLive(data.id)
+    } catch (err) {
+      setStarting(false)
+      setStartError(err instanceof Error ? err.message : 'Could not start the live stream')
+    }
+  }
 
   return (
     <section className="ve-stage ve-live-fullscreen">
@@ -611,21 +617,12 @@ function LivePage({ netState, emit, user, setPage, setThreadChatId, goToLive }: 
               className="ve-btn ve-btn-primary"
               style={{ padding: '16px 40px', fontSize: 16, borderRadius: 999 }}
               disabled={starting}
-              onClick={() => {
-                setStarting(true)
-                setStartError(null)
-                emit({ type: 'live_start', title: `${user.name} live` })
-                if (startTimeoutRef.current) clearTimeout(startTimeoutRef.current)
-                startTimeoutRef.current = setTimeout(() => {
-                  setStarting(false)
-                  setStartError('Could not connect to the live server. Check your connection and try again.')
-                }, 8000)
-              }}
+              onClick={handleGoLive}
             >
               {starting ? 'Going live…' : '🔴 Go Live'}
             </button>
-            {(startError || netState.error) && (
-              <div className="ve-badge" style={{ color: '#ff6b6b', maxWidth: '85vw', textAlign: 'center' }}>{startError || netState.error}</div>
+            {startError && (
+              <div className="ve-badge" style={{ color: '#ff6b6b', maxWidth: '85vw', textAlign: 'center' }}>{startError}</div>
             )}
 
             {netState.lives.length > 0 && (
@@ -652,139 +649,75 @@ function LiveStagePage({ netState, emit, user, setPage }: {
   const live = netState.lives.find(l => l.id === liveId)
   const isHost = live?.hostId === user.id
   const videoRef = useRef<HTMLVideoElement>(null)
-  const localStreamRef = useRef<MediaStream | null>(null)
-  const hostPcs = useRef(new Map<string, RTCPeerConnection>())
-  const viewerPc = useRef<RTCPeerConnection | null>(null)
   const [text, setText] = useState('')
   const [status, setStatus] = useState('Connecting…')
-  const pendingViewers = useRef<{ viewerId: string; liveId: string }[]>([])
-  const joined = useRef(false)
+
+  // Agora client + local tracks live in refs so they survive re-renders
+  // without re-triggering the join effect.
+  const clientRef = useRef<import('agora-rtc-sdk-ng').IAgoraRTCClient | null>(null)
+  const localTracksRef = useRef<[import('agora-rtc-sdk-ng').IMicrophoneAudioTrack, import('agora-rtc-sdk-ng').ICameraVideoTrack] | null>(null)
 
   useEffect(() => {
     if (!liveId) return
-    emit({ type: 'live_join', liveId })
-    joined.current = true
-    return () => {
-      emit({ type: 'live_leave', liveId })
-      localStreamRef.current?.getTracks().forEach(t => t.stop())
-      hostPcs.current.forEach(pc => pc.close())
-      hostPcs.current.clear()
-      viewerPc.current?.close()
-      viewerPc.current = null
-    }
-  }, [liveId])
+    // Joining a live is now just entering the Agora channel below — no
+    // separate WebSocket "join" handshake needed.
+    let cancelled = false
 
-  const offerTo = useCallback((viewerId: string, lId: string, stream: MediaStream) => {
-    const existing = hostPcs.current.get(viewerId)
-    existing?.close()
-    const pc = new RTCPeerConnection(ICE_CONFIG)
-    for (const track of stream.getTracks()) pc.addTrack(track, stream)
-    pc.onicecandidate = e => { if (e.candidate) emit({ type: 'rtc_ice', liveId: lId, to: viewerId, candidate: e.candidate }) }
-    hostPcs.current.set(viewerId, pc)
     ;(async () => {
-      const offer = await pc.createOffer()
-      await pc.setLocalDescription(offer)
-      emit({ type: 'rtc_offer', liveId: lId, to: viewerId, sdp: pc.localDescription })
-    })()
-  }, [emit])
+      const AgoraRTC = (await import('agora-rtc-sdk-ng')).default
+      const client = AgoraRTC.createClient({ mode: 'live', codec: 'vp8' })
+      clientRef.current = client
+      await client.setClientRole(isHost ? 'host' : 'audience')
 
-  useEffect(() => {
-    if (!isHost || !liveId) return
-    let stop = false
-    ;(async () => {
+      client.on('user-published', async (remoteUser, mediaType) => {
+        await client.subscribe(remoteUser, mediaType)
+        if (mediaType === 'video' && videoRef.current) {
+          remoteUser.videoTrack?.play(videoRef.current)
+          setStatus('Watching live')
+        }
+        if (mediaType === 'audio') remoteUser.audioTrack?.play()
+      })
+
       try {
-        const stream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: 'user', width: { ideal: 1280 }, height: { ideal: 720 } },
-          audio: true,
+        const res = await authFetch('/api/agora/token', {
+          method: 'POST',
+          body: JSON.stringify({ channelName: liveId, role: isHost ? 'host' : 'audience' }),
         })
-        if (stop) { stream.getTracks().forEach(t => t.stop()); return }
-        localStreamRef.current = stream
-        if (videoRef.current) {
-          videoRef.current.srcObject = stream
-          videoRef.current.muted = true
-          await videoRef.current.play().catch(() => {})
+        const data = await res.json()
+        if (!res.ok) throw new Error(data.error || 'Could not get a live token')
+        if (cancelled) return
+
+        await client.join(data.appId, data.channelName, data.rtcToken, data.uid)
+        if (cancelled) return
+
+        if (isHost) {
+          const [micTrack, camTrack] = await AgoraRTC.createMicrophoneAndCameraTracks(
+            {},
+            { encoderConfig: '720p_2' },
+          )
+          if (cancelled) { micTrack.close(); camTrack.close(); return }
+          localTracksRef.current = [micTrack, camTrack]
+          if (videoRef.current) camTrack.play(videoRef.current)
+          await client.publish([micTrack, camTrack])
+          setStatus('You are live')
+        } else {
+          setStatus('Waiting for host…')
         }
-        setStatus('You are live')
-        pendingViewers.current.forEach(q => offerTo(q.viewerId, q.liveId, stream))
-      } catch {
-        setStatus('Camera blocked — studio mode')
-        const canvas = document.createElement('canvas')
-        canvas.width = 1280; canvas.height = 720
-        const ctx = canvas.getContext('2d')!
-        const start = performance.now()
-        const draw = () => {
-          const t = (performance.now() - start) / 1000
-          ctx.fillStyle = '#14080c'
-          ctx.fillRect(0, 0, 1280, 720)
-          const g = ctx.createRadialGradient(640, 280, 40, 640, 360, 520)
-          g.addColorStop(0, 'rgba(225,29,72,0.55)')
-          g.addColorStop(1, 'rgba(14,6,9,0.2)')
-          ctx.fillStyle = g
-          ctx.fillRect(0, 0, 1280, 720)
-          ctx.fillStyle = '#fde8ee'
-          ctx.font = '600 42px sans-serif'
-          ctx.textAlign = 'center'
-          ctx.fillText('Valentine Express', 640, 340)
-          ctx.font = '28px sans-serif'
-          ctx.fillStyle = '#fb7185'
-          ctx.fillText('Studio fallback', 640, 390)
-          requestAnimationFrame(draw)
-        }
-        draw()
-        const stream = canvas.captureStream(24)
-        if (stop) { stream.getTracks().forEach(t => t.stop()); return }
-        localStreamRef.current = stream
-        if (videoRef.current) { videoRef.current.srcObject = stream; videoRef.current.muted = true }
-        setStatus('You are live (studio)')
+      } catch (err) {
+        setStatus(err instanceof Error ? err.message : 'Camera/mic blocked — check permissions')
       }
     })()
-    return () => { stop = true }
-  }, [isHost, liveId])
 
-  useEffect(() => {
-    const need = netState.rtcNeedOffer
-    if (!need || !isHost || need.liveId !== liveId) return
-    if (!localStreamRef.current) {
-      pendingViewers.current.push({ viewerId: need.viewerId, liveId: need.liveId })
-      return
+    return () => {
+      cancelled = true
+      // Leaving is just leaving the Agora channel (handled just below) —
+      // no separate WebSocket "leave" message needed anymore.
+      localTracksRef.current?.forEach(t => t.close())
+      localTracksRef.current = null
+      clientRef.current?.leave().catch(() => {})
+      clientRef.current = null
     }
-    offerTo(need.viewerId, need.liveId, localStreamRef.current)
-  }, [netState.rtcNeedOffer, isHost, liveId, offerTo])
-
-  useEffect(() => {
-    const sig = netState.rtcFromHost
-    if (!sig || !liveId || sig.liveId !== liveId) return
-    const from = sig.from
-
-    if (isHost) {
-      const pc = hostPcs.current.get(from)
-      if (!pc) return
-      if (sig.type === 'rtc_answer' && sig.sdp) pc.setRemoteDescription(sig.sdp as RTCSessionDescriptionInit).catch(() => {})
-      if (sig.type === 'rtc_ice' && sig.candidate) pc.addIceCandidate(sig.candidate as RTCIceCandidateInit).catch(() => {})
-      return
-    }
-
-    if (sig.type === 'rtc_offer' && sig.sdp) {
-      viewerPc.current?.close()
-      const pc = new RTCPeerConnection(ICE_CONFIG)
-      pc.onicecandidate = e => { if (e.candidate) emit({ type: 'rtc_ice', liveId, to: from, candidate: e.candidate }) }
-      pc.ontrack = e => {
-        const s = e.streams[0] || new MediaStream([e.track])
-        if (videoRef.current) { videoRef.current.srcObject = s; videoRef.current.play().catch(() => {}) }
-        setStatus('Watching live')
-      }
-      viewerPc.current = pc
-      ;(async () => {
-        await pc.setRemoteDescription(sig.sdp as RTCSessionDescriptionInit)
-        const answer = await pc.createAnswer()
-        await pc.setLocalDescription(answer)
-        emit({ type: 'rtc_answer', liveId, to: from, sdp: pc.localDescription })
-      })()
-    }
-    if (sig.type === 'rtc_ice' && sig.candidate && viewerPc.current) {
-      viewerPc.current.addIceCandidate(sig.candidate as RTCIceCandidateInit).catch(() => {})
-    }
-  }, [netState.rtcFromHost, isHost, liveId])
+  }, [liveId, isHost])
 
   if (!live) {
     return (
@@ -806,7 +739,7 @@ function LiveStagePage({ netState, emit, user, setPage }: {
         <div className="ve-live-overlay">
           <div className="ve-live-top">
             <button className="ve-icon-btn" aria-label="Back" onClick={() => setPage('live')}>←</button>
-            <div className="ve-badge"><span className="ve-live-dot" /> {live.host} · {live.viewers}</div>
+            <div className="ve-badge"><span className="ve-live-dot" /> {live.host} · {live.viewers} · {status}</div>
             <form className="ve-live-chat-top" onSubmit={e => {
               e.preventDefault()
               if (!text.trim()) return
@@ -818,7 +751,7 @@ function LiveStagePage({ netState, emit, user, setPage }: {
             </form>
             {isHost && (
               <button className="ve-icon-btn ve-icon-btn-danger" aria-label="End live" onClick={() => {
-                emit({ type: 'live_end', liveId: live.id })
+                authFetch('/api/live/end', { method: 'POST', body: JSON.stringify({ liveId: live.id }) }).catch(() => {})
                 setPage('live')
               }}>✕</button>
             )}
@@ -1824,6 +1757,32 @@ function HomeInner() {
     setThreadChatId(null)
     setPage('liveStage')
   }
+
+  // Immediately add a just-started live to local state so the host lands
+  // in LiveStagePage without waiting for the next poll cycle below.
+  function registerLive(live: NetLive) {
+    setNetState(n => ({ ...n, lives: [live, ...n.lives.filter(l => l.id !== live.id)] }))
+  }
+
+  // Live discovery is now plain polling against Postgres (via Prisma on
+  // Vercel) instead of a WebSocket "presence" push from the Cloudflare
+  // Worker — simpler, and works with zero extra infrastructure.
+  useEffect(() => {
+    if (!user) return
+    let cancelled = false
+    const poll = async () => {
+      try {
+        const res = await authFetch('/api/live/list')
+        if (!res.ok || cancelled) return
+        const data = await res.json()
+        if (cancelled) return
+        setNetState(n => ({ ...n, lives: data.lives ?? [] }))
+      } catch { /* transient network errors are fine — next poll retries */ }
+    }
+    poll()
+    const id = setInterval(poll, 6000)
+    return () => { cancelled = true; clearInterval(id) }
+  }, [user?.id])
 
   const [viewingProfile, setViewingProfile] = useState<{ id: string; name: string; avatarUrl: string | null; city: string | null } | null>(null)
   function goToProfile(u: { id: string; name: string; avatarUrl: string | null; city: string | null }) {
