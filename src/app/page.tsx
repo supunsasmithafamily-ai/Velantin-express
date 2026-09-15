@@ -1,4 +1,3 @@
-
 /* eslint-disable react-hooks/static-components */
 'use client'
 
@@ -298,7 +297,7 @@ function Shell({ page, setPage, threadChatId, setThreadChatId, user, setUser, ne
         {page === 'chats' && <ChatsPlaceholder />}
         {page === 'thread' && threadChatId && <ThreadPage chatId={threadChatId} netState={netState} emit={emit} user={user} />}
         {page === 'live' && <LivePage netState={netState} emit={emit} user={user} setPage={setPage} setThreadChatId={setThreadChatId} goToLive={goToLive} registerLive={registerLive} />}
-        {page === 'liveStage' && <LiveStagePage netState={netState} emit={emit} user={user} setPage={setPage} />}
+        {page === 'liveStage' && <LiveStagePage netState={netState} emit={emit} user={user} setPage={setPage} refreshUser={handleSetUser} />}
         {page === 'wallet' && <WalletPage user={user} setUser={setStatusMsg} />}
         {page === 'verify' && <VerifyPage user={user} setUser={setStatusMsg} />}
         {page === 'status' && <StatusPage netState={netState} user={user} emit={emit} />}
@@ -642,9 +641,13 @@ function LivePage({ netState, user, setPage, setThreadChatId, goToLive, register
   )
 }
 
-function LiveStagePage({ netState, emit, user, setPage }: {
+type LiveMsg =
+  | { type: 'comment'; user: string; text: string }
+  | { type: 'gift'; user: string; giftName: string; icon: string }
+
+function LiveStagePage({ netState, user, setPage, refreshUser }: {
   netState: NetState; emit: (msg: Record<string, unknown>) => void; user: AuthUser
-  setPage: (p: Page) => void
+  setPage: (p: Page) => void; refreshUser: (msg: string) => void
 }) {
   const liveId = netState.currentLiveId
   const live = netState.lives.find(l => l.id === liveId)
@@ -652,20 +655,26 @@ function LiveStagePage({ netState, emit, user, setPage }: {
   const videoRef = useRef<HTMLVideoElement>(null)
   const [text, setText] = useState('')
   const [status, setStatus] = useState('Connecting…')
+  const [comments, setComments] = useState<{ user: string; text: string }[]>([])
+  const [giftFlash, setGiftFlash] = useState<string | null>(null)
+  const [sendingGift, setSendingGift] = useState<string | null>(null)
 
-  // Agora client + local tracks live in refs so they survive re-renders
-  // without re-triggering the join effect.
+  // Agora RTC (video) + RTM (chat/gifts) clients live in refs so they
+  // survive re-renders without re-triggering the join effect.
   const clientRef = useRef<import('agora-rtc-sdk-ng').IAgoraRTCClient | null>(null)
   const localTracksRef = useRef<[import('agora-rtc-sdk-ng').IMicrophoneAudioTrack, import('agora-rtc-sdk-ng').ICameraVideoTrack] | null>(null)
+  const rtmRef = useRef<InstanceType<typeof import('agora-rtm-sdk').default.RTM> | null>(null)
+  const giftFlashTimeout = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   useEffect(() => {
     if (!liveId) return
-    // Joining a live is now just entering the Agora channel below — no
-    // separate WebSocket "join" handshake needed.
     let cancelled = false
 
     ;(async () => {
-      const AgoraRTC = (await import('agora-rtc-sdk-ng')).default
+      const [AgoraRTC, AgoraRTMModule] = await Promise.all([
+        import('agora-rtc-sdk-ng').then(m => m.default),
+        import('agora-rtm-sdk').then(m => m.default),
+      ])
       const client = AgoraRTC.createClient({ mode: 'live', codec: 'vp8' })
       clientRef.current = client
       await client.setClientRole(isHost ? 'host' : 'audience')
@@ -688,6 +697,7 @@ function LiveStagePage({ netState, emit, user, setPage }: {
         if (!res.ok) throw new Error(data.error || 'Could not get a live token')
         if (cancelled) return
 
+        // --- Video (RTC) ---
         await client.join(data.appId, data.channelName, data.rtcToken, data.uid)
         if (cancelled) return
 
@@ -704,6 +714,26 @@ function LiveStagePage({ netState, emit, user, setPage }: {
         } else {
           setStatus('Waiting for host…')
         }
+
+        // --- Chat/gifts (RTM) ---
+        const rtm = new AgoraRTMModule.RTM(data.appId, user.id, { logLevel: 'error' })
+        rtmRef.current = rtm
+        rtm.addEventListener('message', (event: { channelName: string; message: string }) => {
+          if (event.channelName !== liveId) return
+          try {
+            const msg = JSON.parse(event.message) as LiveMsg
+            if (msg.type === 'comment') {
+              setComments(c => [...c.slice(-40), { user: msg.user, text: msg.text }])
+            } else if (msg.type === 'gift') {
+              if (giftFlashTimeout.current) clearTimeout(giftFlashTimeout.current)
+              setGiftFlash(`${msg.user} sent ${msg.icon} ${msg.giftName}`)
+              setComments(c => [...c.slice(-40), { user: msg.user, text: `sent ${msg.giftName}` }])
+              giftFlashTimeout.current = setTimeout(() => setGiftFlash(null), 4000)
+            }
+          } catch { /* ignore malformed messages */ }
+        })
+        await rtm.login({ token: data.rtmToken })
+        await rtm.subscribe(liveId)
       } catch (err) {
         setStatus(err instanceof Error ? err.message : 'Camera/mic blocked — check permissions')
       }
@@ -711,14 +741,53 @@ function LiveStagePage({ netState, emit, user, setPage }: {
 
     return () => {
       cancelled = true
-      // Leaving is just leaving the Agora channel (handled just below) —
-      // no separate WebSocket "leave" message needed anymore.
       localTracksRef.current?.forEach(t => t.close())
       localTracksRef.current = null
       clientRef.current?.leave().catch(() => {})
       clientRef.current = null
+      if (giftFlashTimeout.current) clearTimeout(giftFlashTimeout.current)
+      const rtm = rtmRef.current
+      rtmRef.current = null
+      if (rtm) {
+        rtm.unsubscribe(liveId).catch(() => {})
+        rtm.logout().catch(() => {})
+      }
     }
   }, [liveId, isHost])
+
+  function sendComment() {
+    const trimmed = text.trim()
+    if (!trimmed || !rtmRef.current || !liveId) return
+    const msg: LiveMsg = { type: 'comment', user: user.name, text: trimmed.slice(0, 240) }
+    rtmRef.current.publish(liveId, JSON.stringify(msg)).catch(() => {})
+    setComments(c => [...c.slice(-40), { user: msg.user, text: msg.text }])
+    setText('')
+  }
+
+  async function sendGift(g: { id: string; name: string; coins: number; icon: string }) {
+    if (!liveId || sendingGift) return
+    setSendingGift(g.id)
+    try {
+      const res = await authFetch('/api/live/gift', {
+        method: 'POST',
+        body: JSON.stringify({ liveId, giftId: g.id }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || 'Gift failed')
+      refreshUser('refresh') // pulls the updated coin balance
+      const msg: LiveMsg = { type: 'gift', user: user.name, giftName: g.name, icon: g.icon }
+      rtmRef.current?.publish(liveId, JSON.stringify(msg)).catch(() => {})
+      setGiftFlash(`You sent ${g.icon} ${g.name}`)
+      if (giftFlashTimeout.current) clearTimeout(giftFlashTimeout.current)
+      giftFlashTimeout.current = setTimeout(() => setGiftFlash(null), 4000)
+    } catch (err) {
+      setGiftFlash(err instanceof Error ? err.message : 'Gift failed')
+      if (giftFlashTimeout.current) clearTimeout(giftFlashTimeout.current)
+      giftFlashTimeout.current = setTimeout(() => setGiftFlash(null), 4000)
+    } finally {
+      setSendingGift(null)
+    }
+  }
 
   if (!live) {
     return (
@@ -731,8 +800,6 @@ function LiveStagePage({ netState, emit, user, setPage }: {
     )
   }
 
-  const comments = netState.comments[live.id] ?? []
-
   return (
     <section className="ve-stage ve-live-fullscreen">
       <div className="ve-live-frame ve-live-frame-full">
@@ -740,13 +807,8 @@ function LiveStagePage({ netState, emit, user, setPage }: {
         <div className="ve-live-overlay">
           <div className="ve-live-top">
             <button className="ve-icon-btn" aria-label="Back" onClick={() => setPage('live')}>←</button>
-            <div className="ve-badge"><span className="ve-live-dot" /> {live.host} · {live.viewers} · {status}</div>
-            <form className="ve-live-chat-top" onSubmit={e => {
-              e.preventDefault()
-              if (!text.trim()) return
-              emit({ type: 'live_comment', liveId: live.id, text: text.trim() })
-              setText('')
-            }}>
+            <div className="ve-badge"><span className="ve-live-dot" /> {live.host} · {status}</div>
+            <form className="ve-live-chat-top" onSubmit={e => { e.preventDefault(); sendComment() }}>
               <input value={text} onChange={e => setText(e.target.value)} placeholder="Say something…" />
               <button className="ve-icon-btn ve-icon-btn-primary" type="submit" aria-label="Send">➤</button>
             </form>
@@ -764,7 +826,7 @@ function LiveStagePage({ netState, emit, user, setPage }: {
                 <b>{c.user}</b> {c.text}
               </div>
             ))}
-            {netState.giftFlash && <div className="ve-badge">{netState.giftFlash}</div>}
+            {giftFlash && <div className="ve-badge">{giftFlash}</div>}
           </div>
 
           {!isHost && (
@@ -774,7 +836,8 @@ function LiveStagePage({ netState, emit, user, setPage }: {
                   key={g.id}
                   className="ve-gift-3d"
                   title={`${g.name} · ${g.coins} coins`}
-                  onClick={() => emit({ type: 'live_gift', liveId: live.id, giftId: g.id })}
+                  disabled={sendingGift === g.id}
+                  onClick={() => sendGift(g)}
                 >
                   <span className="ve-gift-emoji">{g.icon}</span>
                 </button>
