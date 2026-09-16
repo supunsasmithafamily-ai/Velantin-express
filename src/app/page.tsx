@@ -2195,4 +2195,3 @@ export default function Home() {
     </AppErrorBoundary>
   )
 }
-
