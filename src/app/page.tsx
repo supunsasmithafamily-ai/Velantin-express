@@ -294,7 +294,7 @@ function Shell({ page, setPage, threadChatId, setThreadChatId, user, setUser, ne
       <main style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>
         {page === 'home' && <HomePage netState={netState} user={user} emit={emit} goToLive={goToLive} goToProfile={goToProfile} />}
         {page === 'publicProfile' && <PublicProfilePage basicUser={viewingProfile} setPage={setPage} emit={emit} />}
-        {page === 'chats' && <ChatsPlaceholder />}
+        {page === 'chats' && <ChatsPage netState={netState} user={user} emit={emit} setThreadChatId={setThreadChatId} setPage={setPage} />}
         {page === 'thread' && threadChatId && <ThreadPage chatId={threadChatId} netState={netState} emit={emit} user={user} />}
         {page === 'live' && <LivePage netState={netState} emit={emit} user={user} setPage={setPage} setThreadChatId={setThreadChatId} goToLive={goToLive} registerLive={registerLive} />}
         {page === 'liveStage' && <LiveStagePage netState={netState} emit={emit} user={user} setPage={setPage} refreshUser={handleSetUser} />}
@@ -317,15 +317,48 @@ function Shell({ page, setPage, threadChatId, setThreadChatId, user, setUser, ne
   )
 }
 
-function ChatsPlaceholder() {
+function ChatsPage({ netState, user, emit, setThreadChatId, setPage }: {
+  netState: NetState; user: AuthUser; emit: (msg: Record<string, unknown>) => void
+  setThreadChatId: (id: string | null) => void; setPage: (p: Page) => void
+}) {
+  const others = netState.users.filter(u => u.id !== user.id)
   return (
     <section className="ve-stage">
       <div className="ve-topbar">
-        <strong>Valentine Express</strong>
-        <span className="ve-muted">Lobby + DMs are shared live</span>
+        <strong>Chats</strong>
+        <span className="ve-muted">{others.length} online</span>
       </div>
-      <div style={{ padding: 28 }} className="ve-muted">
-        Open Lobby or tap an online user. Messages go through the server to every connected device.
+      <div className="ve-list ve-scroll" style={{ padding: 12 }}>
+        {netState.chats.length === 0 && others.length === 0 && (
+          <div className="ve-muted" style={{ padding: 16 }}>No chats yet — online users will show up here.</div>
+        )}
+        {netState.chats.map(c => (
+          <button
+            key={c.id}
+            className="ve-row"
+            onClick={() => { setThreadChatId(c.id); setPage('thread') }}
+          >
+            <div className="ve-avatar">{c.name[0]}</div>
+            <div>
+              <strong>{c.name}</strong>
+              <span>{c.last} · {c.time}</span>
+            </div>
+          </button>
+        ))}
+        {others.length > 0 && <div style={{ padding: 12 }} className="ve-muted">Online</div>}
+        {others.map(u => (
+          <button
+            key={u.id}
+            className="ve-row"
+            onClick={() => emit({ type: 'dm_open', peerId: u.id })}
+          >
+            <div className="ve-avatar">{u.name[0]}</div>
+            <div>
+              <strong>{u.name}</strong>
+              <span className="ve-online-indicator"><span className="ve-online-heart">❤</span> Online</span>
+            </div>
+          </button>
+        ))}
       </div>
     </section>
   )
@@ -446,7 +479,7 @@ function HomePage({ netState, user, emit, goToLive, goToProfile }: {
                 >
                   <div className="ve-user-card-avatar" style={{ backgroundImage: u.avatarUrl ? `url(${u.avatarUrl})` : undefined }}>
                     {!u.avatarUrl && u.name[0]}
-                    <span className={`ve-presence-dot${online ? ' online' : ''}`} />
+                    {online && <span className="ve-online-heart ve-online-heart-badge">❤</span>}
                   </div>
                   <strong>{u.name}</strong>
                   {liveId ? <span className="ve-badge" style={{ marginTop: 4 }}><span className="ve-live-dot" /> LIVE</span> : (u.city && <span className="ve-muted">{u.city}</span>)}
