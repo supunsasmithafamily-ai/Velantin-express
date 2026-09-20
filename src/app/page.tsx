@@ -1157,6 +1157,8 @@ function WalletPage({ user, setUser }: { user: AuthUser; setUser: (msg: string) 
         setMsg(`Payment confirmed — coins credited.`)
         setPendingOrder(null)
         setUser('refresh')
+      } else if (data.pending) {
+        setMsg(data.message || 'Payment is awaiting provider confirmation.')
       } else {
         setMsg(data.error || 'Payment not yet approved — try again after approving in the PayPal window.')
       }

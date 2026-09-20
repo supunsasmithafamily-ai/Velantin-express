@@ -292,9 +292,22 @@ src/server/payments/
 
 Select provider via env vars:
 ```
-PAYMENTS_BUY_PROVIDER=paypal       # or: dialog_genie
+PAYMENTS_BUY_PROVIDER=paypal       # or: dialog_genie, oxapay
 PAYMENTS_WITHDRAW_PROVIDER=paypal   # or: dialog_genie
 ```
+
+### OxaPay crypto coin purchases
+
+OxaPay is supported for coin purchases by setting `PAYMENTS_BUY_PROVIDER=oxapay`,
+`OXAPAY_MERCHANT_API_KEY`, and `OXAPAY_MODE=live` (or `sandbox`). The app creates
+an OxaPay invoice and credits coins only after the signed `Paid` callback is
+received. Configure the callback URL in OxaPay as
+`https://YOUR_DOMAIN/api/payments/webhook`; the endpoint validates the raw-body
+HMAC-SHA512 signature using the merchant API key. Keep
+`PAYMENTS_WITHDRAW_PROVIDER=paypal` for creator cashouts until an OxaPay payout
+address and payout API key are configured and tested; the current OxaPay adapter
+intentionally rejects withdrawals rather than sending funds to an unverified
+destination.
 
 ---
 

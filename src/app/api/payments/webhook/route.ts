@@ -4,8 +4,8 @@ import { getBuyProvider } from '@/server/payments';
 
 export async function POST(request: NextRequest) {
   try {
-    // PayPal sends JSON body
-    const body = await request.json();
+    // Preserve the exact bytes: OxaPay signs the raw JSON body with HMAC-SHA512.
+    const body = await request.text();
 
     // Collect headers for verification
     const headers: Record<string, string> = {};
@@ -20,6 +20,8 @@ export async function POST(request: NextRequest) {
       const val = request.headers.get(key);
       if (val) headers[key] = val;
     }
+    const hmac = request.headers.get('hmac');
+    if (hmac) headers.hmac = hmac;
 
     const provider = getBuyProvider();
     const result = await provider.handlePurchaseWebhook(body, headers);
@@ -55,7 +57,9 @@ export async function POST(request: NextRequest) {
 
       await tx.wallet.update({
         where: { userId: order.userId },
-        data: { coins: { increment: result.coins } },
+        // The server-created order is authoritative; never trust a webhook
+        // description to decide how many coins to credit.
+        data: { coins: { increment: order.coins } },
       });
     });
 
