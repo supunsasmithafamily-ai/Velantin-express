@@ -2,6 +2,9 @@
 // Firebase API keys are safe to expose; security is enforced by Firebase Security Rules.
 
 import { initializeApp, getApps } from "firebase/app";
+import { getAuth } from "firebase/auth";
+import { getFirestore } from "firebase/firestore";
+import { getStorage } from "firebase/storage";
 import { getAnalytics, isSupported as analyticsIsSupported } from "firebase/analytics";
 import { getMessaging, isSupported as messagingIsSupported, type Messaging } from "firebase/messaging";
 
@@ -46,3 +49,6 @@ export async function getFirebaseMessaging(): Promise<Messaging | null> {
 }
 
 export { app, analytics };
+export const auth = getAuth(app);
+export const firestore = getFirestore(app);
+export const storage = getStorage(app);

@@ -10,7 +10,8 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { SignJWT, jwtVerify } from "jose";
-import { db } from "@/lib/db";
+import { verifyFirebaseIdToken } from "@/lib/firebase-admin";
+import { getFirebaseUserRole } from "@/lib/firebase-repo";
 
 const SESSION_TTL_SECONDS = 60 * 60 * 24 * 30; // 30 days
 
@@ -53,10 +54,16 @@ export async function getSessionUserId(
   if (!token) return null;
 
   try {
-    const { payload } = await jwtVerify(token, getSecretKey());
-    return typeof payload.sub === "string" ? payload.sub : null;
+    const decoded = await verifyFirebaseIdToken(token);
+    return decoded.uid;
   } catch {
-    return null;
+    // Keep accepting legacy local JWTs during the migration window.
+    try {
+      const { payload } = await jwtVerify(token, getSecretKey());
+      return typeof payload.sub === "string" ? payload.sub : null;
+    } catch {
+      return null;
+    }
   }
 }
 
@@ -87,8 +94,8 @@ export async function requireAdmin(
   const auth = await requireUser(request);
   if (auth instanceof NextResponse) return auth;
 
-  const user = await db.user.findUnique({ where: { id: auth.userId } });
-  if (!user || user.role !== "admin") {
+  const role = await getFirebaseUserRole(auth.userId);
+  if (role !== "admin") {
     return NextResponse.json(
       { error: "Unauthorized: admin role required" },
       { status: 403 },

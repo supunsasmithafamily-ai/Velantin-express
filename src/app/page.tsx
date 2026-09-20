@@ -1,10 +1,9 @@
 /* eslint-disable react-hooks/static-components */
 'use client'
 
-import { useState, useEffect, useRef, useCallback, useMemo, Component, type ReactNode } from 'react'
-import { connectSocket, disconnectSocket } from '@/lib/socket'
+import { useState, useEffect, useRef, useMemo, Component, type ReactNode } from 'react'
 import { authFetch, setToken, clearToken, getToken } from '@/lib/auth-client'
-import { uploadImageDirect } from '@/lib/cloudinary-client'
+import { uploadImageDirect } from '@/lib/firebase-storage-client'
 import { requestNotificationPermission, listenForForegroundMessages } from '@/lib/push-notifications'
 import {
   Home as LucideHome,
@@ -93,10 +92,9 @@ type AuthUser = {
 
 // ============ COMPONENTS ============
 
-function LandingPage({ onLogin, onGoRegister, wsConnected, wsError }: {
+function LandingPage({ onLogin, onGoRegister, wsError }: {
   onLogin: (email: string, password: string) => void
   onGoRegister: () => void
-  wsConnected: boolean
   wsError: string | null
 }) {
   const [email, setEmail] = useState('')
@@ -124,8 +122,8 @@ function LandingPage({ onLogin, onGoRegister, wsConnected, wsError }: {
         <input className="ve-field" type="password" placeholder="Password" value={password} onChange={e => setPassword(e.target.value)} />
         {error && <p className="ve-err" style={{ marginTop: 8 }}>{error}</p>}
         {wsError && <p className="ve-err" style={{ marginTop: 8 }}>{wsError}</p>}
-        <button className="ve-btn ve-btn-primary" style={{ width: '100%', marginTop: 14 }} type="submit" disabled={!wsConnected}>
-          {wsConnected ? 'Sign in' : 'Connecting to server…'}
+        <button className="ve-btn ve-btn-primary" style={{ width: '100%', marginTop: 14 }} type="submit">
+          Sign in
         </button>
         <p className="ve-muted" style={{ marginTop: 14 }}>
           Don&apos;t have an account? <button type="button" className="ve-btn-ghost" style={{ color: 'var(--ve-rose-2)' }} onClick={onGoRegister}>Register</button>
@@ -135,10 +133,9 @@ function LandingPage({ onLogin, onGoRegister, wsConnected, wsError }: {
   )
 }
 
-function RegisterPage({ onRegister, onGoLogin, wsConnected }: {
+function RegisterPage({ onRegister, onGoLogin }: {
   onRegister: (name: string, email: string, password: string) => void
   onGoLogin: () => void
-  wsConnected: boolean
 }) {
   const [name, setName] = useState('')
   const [email, setEmail] = useState('')
@@ -186,14 +183,15 @@ function RegisterPage({ onRegister, onGoLogin, wsConnected }: {
   )
 }
 
-function Shell({ page, setPage, threadChatId, setThreadChatId, user, setUser, netState, emit, socket, setStatusMsg, onLogout, goToLive, goToProfile, viewingProfile }: {
+function Shell({ page, setPage, threadChatId, setThreadChatId, user, setUser, netState, setStatusMsg, onLogout, goToLive, goToProfile, viewingProfile, registerLive, refreshUser }: {
   page: Page; setPage: (p: Page) => void
   threadChatId: string | null; setThreadChatId: (id: string | null) => void
-  user: AuthUser; setUser: (u: AuthUser) => void; netState: NetState; emit: (msg: Record<string, unknown>) => void
-  socket: any; setStatusMsg: (m: string) => void; onLogout: () => void
+  user: AuthUser; setUser: (u: AuthUser) => void; netState: NetState; setStatusMsg: (m: string) => void; onLogout: () => void
   goToLive: (liveId: string) => void
   goToProfile: (u: { id: string; name: string; avatarUrl: string | null; city: string | null }) => void
   viewingProfile: { id: string; name: string; avatarUrl: string | null; city: string | null } | null
+  registerLive: (live: NetLive) => void
+  refreshUser: (msg: string) => void
 }) {
   const navItems = [
     { to: 'home' as Page, label: 'Home', Icon: LucideHome },
@@ -237,7 +235,7 @@ function Shell({ page, setPage, threadChatId, setThreadChatId, user, setUser, ne
         )}
         <div style={{ flex: 1 }} />
         <div className="ve-muted" style={{ fontSize: 10, textAlign: 'center' }}>
-          {socket?.connected ? `${netState.users.length} online` : 'offline'}
+          Live video via Agora
         </div>
         {/* User avatar in rail */}
         <div
@@ -278,7 +276,7 @@ function Shell({ page, setPage, threadChatId, setThreadChatId, user, setUser, ne
             ))}
             <div style={{ padding: 12 }} className="ve-muted">Online</div>
             {netState.users.filter(u => u.id !== user.id).map(u => (
-              <button key={u.id} className="ve-row" onClick={() => emit({ type: 'dm_open', peerId: u.id })}>
+              <button key={u.id} className="ve-row" disabled title="Realtime chat requires Firebase migration">
                 <div className="ve-avatar">{u.name[0]}</div>
                 <div>
                   <strong>{u.name}</strong>
@@ -292,15 +290,15 @@ function Shell({ page, setPage, threadChatId, setThreadChatId, user, setUser, ne
 
       {/* Main stage */}
       <main style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>
-        {page === 'home' && <HomePage netState={netState} user={user} emit={emit} goToLive={goToLive} goToProfile={goToProfile} />}
-        {page === 'publicProfile' && <PublicProfilePage basicUser={viewingProfile} setPage={setPage} emit={emit} />}
-        {page === 'chats' && <ChatsPage netState={netState} user={user} emit={emit} setThreadChatId={setThreadChatId} setPage={setPage} />}
-        {page === 'thread' && threadChatId && <ThreadPage chatId={threadChatId} netState={netState} emit={emit} user={user} />}
-        {page === 'live' && <LivePage netState={netState} emit={emit} user={user} setPage={setPage} setThreadChatId={setThreadChatId} goToLive={goToLive} registerLive={registerLive} />}
-        {page === 'liveStage' && <LiveStagePage netState={netState} emit={emit} user={user} setPage={setPage} refreshUser={handleSetUser} />}
+        {page === 'home' && <HomePage netState={netState} user={user} goToLive={goToLive} goToProfile={goToProfile} />}
+        {page === 'publicProfile' && <PublicProfilePage basicUser={viewingProfile} setPage={setPage} />}
+        {page === 'chats' && <ChatsPage netState={netState} user={user} setThreadChatId={setThreadChatId} setPage={setPage} />}
+        {page === 'thread' && threadChatId && <ThreadPage chatId={threadChatId} netState={netState} user={user} />}
+        {page === 'live' && <LivePage netState={netState} user={user} setPage={setPage} setThreadChatId={setThreadChatId} goToLive={goToLive} registerLive={registerLive} />}
+        {page === 'liveStage' && <LiveStagePage netState={netState} user={user} setPage={setPage} refreshUser={refreshUser} />}
         {page === 'wallet' && <WalletPage user={user} setUser={setStatusMsg} />}
         {page === 'verify' && <VerifyPage user={user} setUser={setStatusMsg} />}
-        {page === 'status' && <StatusPage netState={netState} user={user} emit={emit} />}
+        {page === 'status' && <StatusPage netState={netState} user={user} />}
         {page === 'admin' && user.role === 'admin' && <AdminPage user={user} />}
         {page === 'profile' && <ProfilePage user={user} setUser={setUser} onLogout={onLogout} />}
       </main>
@@ -317,8 +315,8 @@ function Shell({ page, setPage, threadChatId, setThreadChatId, user, setUser, ne
   )
 }
 
-function ChatsPage({ netState, user, emit, setThreadChatId, setPage }: {
-  netState: NetState; user: AuthUser; emit: (msg: Record<string, unknown>) => void
+function ChatsPage({ netState, user, setThreadChatId, setPage }: {
+  netState: NetState; user: AuthUser
   setThreadChatId: (id: string | null) => void; setPage: (p: Page) => void
 }) {
   const others = netState.users.filter(u => u.id !== user.id)
@@ -350,7 +348,7 @@ function ChatsPage({ netState, user, emit, setThreadChatId, setPage }: {
           <button
             key={u.id}
             className="ve-row"
-            onClick={() => emit({ type: 'dm_open', peerId: u.id })}
+            disabled title="Realtime chat requires Firebase migration"
           >
             <div className="ve-avatar">{u.name[0]}</div>
             <div>
@@ -364,8 +362,8 @@ function ChatsPage({ netState, user, emit, setThreadChatId, setPage }: {
   )
 }
 
-function ThreadPage({ chatId, netState, emit, user }: {
-  chatId: string; netState: NetState; emit: (msg: Record<string, unknown>) => void; user: AuthUser
+function ThreadPage({ chatId, netState, user }: {
+  chatId: string; netState: NetState; user: AuthUser
 }) {
   const [text, setText] = useState('')
   const chat = netState.chats.find(c => c.id === chatId)
@@ -403,21 +401,21 @@ function ThreadPage({ chatId, netState, emit, user }: {
           </div>
         ))}
       </div>
+      <p className="ve-muted" style={{ padding: '0 20px' }}>Realtime chat requires Firebase migration.</p>
       <form className="ve-composer" onSubmit={e => {
         e.preventDefault()
         if (!text.trim()) return
-        emit({ type: 'chat_send', chatId: chat.id, text: text.trim() })
         setText('')
       }}>
-        <input className="ve-field" style={{ marginTop: 0 }} value={text} onChange={e => setText(e.target.value)} placeholder="Message" />
-        <button className="ve-btn ve-btn-primary" type="submit">Send</button>
+        <input className="ve-field" style={{ marginTop: 0 }} value={text} onChange={e => setText(e.target.value)} placeholder="Chat migration pending" disabled />
+        <button className="ve-btn ve-btn-primary" type="submit" disabled>Send</button>
       </form>
     </section>
   )
 }
 
-function HomePage({ netState, user, emit, goToLive, goToProfile }: {
-  netState: NetState; user: AuthUser; emit: (msg: Record<string, unknown>) => void
+function HomePage({ netState, user, goToLive, goToProfile }: {
+  netState: NetState; user: AuthUser
   goToLive: (liveId: string) => void
   goToProfile: (u: { id: string; name: string; avatarUrl: string | null; city: string | null }) => void
 }) {
@@ -516,10 +514,9 @@ function HomePage({ netState, user, emit, goToLive, goToProfile }: {
   )
 }
 
-function PublicProfilePage({ basicUser, setPage, emit }: {
+function PublicProfilePage({ basicUser, setPage }: {
   basicUser: { id: string; name: string; avatarUrl: string | null; city: string | null } | null
   setPage: (p: Page) => void
-  emit: (msg: Record<string, unknown>) => void
 }) {
   const [extra, setExtra] = useState<{ bio?: string | null; gender?: string | null; age?: number | null } | null>(null)
 
@@ -557,7 +554,7 @@ function PublicProfilePage({ basicUser, setPage, emit }: {
           <button
             className="ve-btn ve-btn-primary"
             style={{ marginTop: 16 }}
-            onClick={() => { emit({ type: 'dm_open', peerId: basicUser.id }); setPage('chats') }}
+            disabled title="Realtime chat requires Firebase migration"
           >
             Message
           </button>
@@ -568,7 +565,7 @@ function PublicProfilePage({ basicUser, setPage, emit }: {
 }
 
 function LivePage({ netState, user, setPage, setThreadChatId, goToLive, registerLive }: {
-  netState: NetState; emit: (msg: Record<string, unknown>) => void; user: AuthUser
+  netState: NetState; user: AuthUser
   setPage: (p: Page) => void; setThreadChatId: (id: string | null) => void
   goToLive: (liveId: string) => void; registerLive: (live: NetLive) => void
 }) {
@@ -679,7 +676,7 @@ type LiveMsg =
   | { type: 'gift'; user: string; giftName: string; icon: string }
 
 function LiveStagePage({ netState, user, setPage, refreshUser }: {
-  netState: NetState; emit: (msg: Record<string, unknown>) => void; user: AuthUser
+  netState: NetState; user: AuthUser
   setPage: (p: Page) => void; refreshUser: (msg: string) => void
 }) {
   const liveId = netState.currentLiveId
@@ -751,10 +748,11 @@ function LiveStagePage({ netState, user, setPage, refreshUser }: {
         // --- Chat/gifts (RTM) ---
         const rtm = new AgoraRTMModule.RTM(data.appId, user.id, { logLevel: 'error' })
         rtmRef.current = rtm
-        rtm.addEventListener('message', (event: { channelName: string; message: string }) => {
+        rtm.addEventListener('message', (event) => {
           if (event.channelName !== liveId) return
           try {
-            const msg = JSON.parse(event.message) as LiveMsg
+            const rawMessage = typeof event.message === 'string' ? event.message : new TextDecoder().decode(event.message)
+            const msg = JSON.parse(rawMessage) as LiveMsg
             if (msg.type === 'comment') {
               setComments(c => [...c.slice(-40), { user: msg.user, text: msg.text }])
             } else if (msg.type === 'gift') {
@@ -1431,7 +1429,7 @@ function VerifyPage({ user, setUser }: { user: AuthUser; setUser: (msg: string) 
   )
 }
 
-function StatusPage({ netState, user, emit }: { netState: NetState; user: AuthUser; emit: (msg: Record<string, unknown>) => void }) {
+function StatusPage({ netState, user }: { netState: NetState; user: AuthUser }) {
   const [text, setText] = useState('')
   const [imageUrl, setImageUrl] = useState<string | null>(null)
   const [uploading, setUploading] = useState(false)
@@ -1835,15 +1833,12 @@ function HomeInner() {
   const [page, setPage] = useState<Page>('landing')
   const [user, setUser] = useState<AuthUser | null>(null)
   const [authError, setAuthError] = useState('')
-  const [socket, setSocket] = useState<any>(null)
   const [threadChatId, setThreadChatId] = useState<string | null>(null)
   const [netState, setNetState] = useState<NetState>({
     connected: false, error: null, me: null, users: [], chats: [], messages: {},
     lives: [], comments: {}, openChatId: null, rtcNeedOffer: null, rtcFromHost: null,
     giftFlash: null, currentLiveId: null, statuses: [],
   })
-  const netRef = useRef(netState)
-  useEffect(() => { netRef.current = netState })
 
   // Reliably navigate into a live stream (host's own, or joining someone
   // else's). Previously, clicking another user's live tile only set
@@ -1861,7 +1856,7 @@ function HomeInner() {
     setNetState(n => ({ ...n, lives: [live, ...n.lives.filter(l => l.id !== live.id)] }))
   }
 
-  // Live discovery is now plain polling against Postgres (via Prisma on
+  // Live discovery is now plain polling against Firestore on
   // Vercel) instead of a WebSocket "presence" push from the Cloudflare
   // Worker — simpler, and works with zero extra infrastructure.
   useEffect(() => {
@@ -1907,127 +1902,23 @@ function HomeInner() {
     return () => { unsubscribe?.() }
   }, [user?.id])
 
-  // Connect socket.io (via CDN)
+  // Restore an existing HTTP session without opening a websocket.
   useEffect(() => {
-    const s = connectSocket()
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setSocket(s)
-    s.on('connect', () => {
-      setNetState(n => ({ ...n, connected: true, error: null }))
-      const existingToken = getToken()
-      if (existingToken) {
-        // Returning visitor with a stored session — resume without a
-        // manual login, and (re)join the WS with the same signed token.
-        authFetch('/api/auth/me').then(r => r.ok ? r.json() : Promise.reject())
-          .then((meData: any) => {
-            setUser({
-              id: meData.user.id,
-              name: meData.user.name,
-              email: meData.user.email,
-              role: meData.user.role,
-              coins: meData.wallet?.coins ?? 0,
-              diamonds: meData.wallet?.diamonds ?? 0,
-              lifetimeEarned: meData.wallet?.lifetimeEarned ?? 0,
-              avatarUrl: meData.profile?.avatarUrl,
-              paypalEmail: meData.profile?.paypalEmail,
-              kycStatus: meData.kyc?.status ?? 'none',
-              bio: meData.profile?.bio,
-              birthday: meData.profile?.birthday,
-              city: meData.profile?.city,
-              gender: meData.profile?.gender,
-              age: meData.profile?.age,
-            })
-            s.emit('hello', { token: existingToken })
-            setShowDailyBonus(true)
-            setPage(p => p === 'landing' || p === 'register' ? 'home' : p)
-          })
-          .catch(() => { clearToken() })
-      }
-    })
-    s.on('disconnect', () => setNetState(n => ({ ...n, connected: false })))
-    s.on('error', (err: unknown) => {
-      const message = typeof err === 'string' ? err : (err && typeof err === 'object' && 'error' in err ? String((err as { error: unknown }).error) : 'Something went wrong')
-      setNetState(n => ({ ...n, error: message }))
-    })
-
-    s.on('snapshot', (data: any) => {
-      setNetState(n => ({
-        ...n,
-        me: data.me,
-        users: data.users ?? [],
-        chats: data.chats ?? [],
-        messages: data.messages ?? {},
-        lives: data.lives ?? [],
-        comments: data.comments ?? {},
-        statuses: (data.statuses ?? []).map((s: any) => ({
-          id: s.id,
-          userName: s.userName,
-          text: s.text,
-          imageUrl: s.imageUrl,
-          age: s.age ?? (s.createdAt ? new Date(s.createdAt).toLocaleString() : ''),
-        })),
-      }))
-    })
-
-    s.on('presence', (data: any) => setNetState(n => ({ ...n, users: data.users ?? [] })))
-    s.on('open_chat', (data: any) => {
-      setNetState(n => ({ ...n, openChatId: data.chatId }))
-      setThreadChatId(data.chatId)
-      setPage('thread')
-    })
-    s.on('chat_msg', (data: any) => {
-      setNetState(n => {
-        const chatId = data.chatId
-        const message = data.message
-        const chat = data.chat
-        const msgs = { ...n.messages, [chatId]: [...(n.messages[chatId] ?? []), message] }
-        const chats = chat ? [chat, ...n.chats.filter(c => c.id !== chat.id)] : n.chats
-        return { ...n, messages: msgs, chats }
+    const existingToken = getToken()
+    if (!existingToken) return
+    authFetch('/api/auth/me').then(r => r.ok ? r.json() : Promise.reject())
+      .then((meData: any) => {
+        setUser({
+          id: meData.user.id, name: meData.user.name, email: meData.user.email, role: meData.user.role,
+          coins: meData.wallet?.coins ?? 0, diamonds: meData.wallet?.diamonds ?? 0, lifetimeEarned: meData.wallet?.lifetimeEarned ?? 0,
+          avatarUrl: meData.profile?.avatarUrl, paypalEmail: meData.profile?.paypalEmail, kycStatus: meData.kyc?.status ?? 'none',
+          bio: meData.profile?.bio, birthday: meData.profile?.birthday, city: meData.profile?.city, gender: meData.profile?.gender, age: meData.profile?.age,
+        })
+        setShowDailyBonus(true)
+        setPage(p => p === 'landing' || p === 'register' ? 'home' : p)
       })
-    })
-    s.on('lives', (data: any) => setNetState(n => ({ ...n, lives: data.lives ?? [] })))
-    s.on('live_started', (data: any) => {
-      const live = data.live
-      setNetState(n => {
-        const lives = [live, ...n.lives.filter(l => l.id !== live.id)]
-        return { ...n, lives, currentLiveId: live.id }
-      })
-      setPage('liveStage')
-      setThreadChatId(null)
-    })
-    s.on('live_ended', (data: any) => {
-      setNetState(n => ({
-        ...n,
-        lives: n.lives.filter(l => l.id !== data.liveId),
-        currentLiveId: n.currentLiveId === data.liveId ? null : n.currentLiveId,
-      }))
-      if (netRef.current.currentLiveId === data.liveId) setPage('live')
-    })
-    s.on('live_state', (data: any) => {
-      const live = data.live
-      setNetState(n => {
-        const lives = n.lives.some(l => l.id === live.id) ? n.lives.map(l => l.id === live.id ? live : l) : [live, ...n.lives]
-        const comments = { ...n.comments, [live.id]: data.comments ?? [] }
-        let giftFlash = n.giftFlash
-        if (data.gift) {
-          const g = data.gift as { from: string; name: string }
-          giftFlash = `${g.from} sent ${g.name}`
-          setTimeout(() => setNetState(nn => ({ ...nn, giftFlash: null })), 3000)
-        }
-        return { ...n, lives, comments, giftFlash }
-      })
-    })
-    s.on('rtc_need_offer', (data: any) => setNetState(n => ({ ...n, rtcNeedOffer: data })))
-    s.on('rtc_offer', (data: any) => setNetState(n => ({ ...n, rtcFromHost: data })))
-    s.on('rtc_answer', (data: any) => setNetState(n => ({ ...n, rtcFromHost: data })))
-    s.on('rtc_ice', (data: any) => setNetState(n => ({ ...n, rtcFromHost: data })))
-
-    return () => { disconnectSocket() }
+      .catch(() => { clearToken() })
   }, [])
-
-  const emit = useCallback((msg: Record<string, unknown>) => {
-    if (socket?.connected) socket.emit(msg.type as string, msg)
-  }, [socket])
 
   // Load statuses on mount
   useEffect(() => {
@@ -2066,9 +1957,6 @@ function HomeInner() {
     setUser(fullUser)
     setShowDailyBonus(true)
 
-    if (socket?.connected) {
-      socket.emit('hello', { token: data.token })
-    }
     setPage('home')
   }
 
@@ -2137,7 +2025,6 @@ function HomeInner() {
   }
 
   function handleLogout() {
-    disconnectSocket()
     clearToken()
     setUser(null as any)
     setShowDailyBonus(false)
@@ -2160,7 +2047,7 @@ function HomeInner() {
   if (page === 'register') {
     return (
       <div className="ve-app-bg">
-        <RegisterPage onRegister={handleRegister} onGoLogin={() => setPage('landing')} wsConnected={netState.connected} />
+        <RegisterPage onRegister={handleRegister} onGoLogin={() => setPage('landing')} />
       </div>
     )
   }
@@ -2168,7 +2055,7 @@ function HomeInner() {
   if (!user) {
     return (
       <div className="ve-app-bg">
-        <LandingPage onLogin={handleLogin} onGoRegister={() => setPage('register')} wsConnected={netState.connected} wsError={authError || netState.error} />
+        <LandingPage onLogin={handleLogin} onGoRegister={() => setPage('register')} wsError={authError || null} />
       </div>
     )
   }
@@ -2178,9 +2065,10 @@ function HomeInner() {
       <Shell
         page={page} setPage={setPage}
         threadChatId={threadChatId} setThreadChatId={setThreadChatId}
-        user={user} setUser={setUser} netState={netState} emit={emit} socket={socket}
+        user={user} setUser={setUser} netState={netState}
         setStatusMsg={handleSetUser} onLogout={handleLogout}
         goToLive={goToLive} goToProfile={goToProfile} viewingProfile={viewingProfile}
+        registerLive={registerLive} refreshUser={handleSetUser}
       />
       {showDailyBonus && <DailyBonusModal onClaimed={() => handleSetUser('refresh')} />}
       <PushToast toasts={pushToasts} onDismiss={id => setPushToasts(t => t.filter(x => x.id !== id))} />

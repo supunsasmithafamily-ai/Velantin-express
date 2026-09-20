@@ -1,54 +1,25 @@
 import { NextRequest, NextResponse } from 'next/server';
-import bcrypt from 'bcryptjs';
-import { db } from '@/lib/db';
-import { createSessionToken } from '@/lib/session';
+import { firebaseSignIn } from '@/lib/firebase-auth-rest';
+import { getFirebaseUserRecord } from '@/lib/firebase-repo';
 
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { email, password } = body;
+    const email = typeof body.email === 'string' ? body.email.toLowerCase().trim() : '';
+    const password = typeof body.password === 'string' ? body.password : '';
+    if (!email || !password) return NextResponse.json({ error: 'Email and password are required' }, { status: 400 });
 
-    if (!email || !password) {
-      return NextResponse.json(
-        { error: 'Email and password are required' },
-        { status: 400 },
-      );
-    }
-
-    const normalizedEmail = email.toLowerCase().trim();
-    const user = await db.user.findUnique({ where: { email: normalizedEmail } });
-
-    if (!user) {
-      return NextResponse.json(
-        { error: 'Invalid email or password' },
-        { status: 401 },
-      );
-    }
-
-    const valid = await bcrypt.compare(password, user.password);
-    if (!valid) {
-      return NextResponse.json(
-        { error: 'Invalid email or password' },
-        { status: 401 },
-      );
-    }
-
-    const token = await createSessionToken(user.id);
-
+    const auth = await firebaseSignIn(email, password);
+    const record = await getFirebaseUserRecord(auth.localId);
+    if (!record?.user) return NextResponse.json({ error: 'User profile not found' }, { status: 404 });
     return NextResponse.json({
-      user: {
-        id: user.id,
-        name: user.name,
-        email: user.email,
-        role: user.role,
-      },
-      token,
+      user: { id: auth.localId, name: record.user.name, email: record.user.email, role: record.user.role },
+      token: auth.idToken,
     });
   } catch (error) {
-    console.error('Login error:', error);
-    return NextResponse.json(
-      { error: 'Internal server error' },
-      { status: 500 },
-    );
+    const message = error instanceof Error ? error.message : 'Invalid email or password';
+    const status = message === 'Invalid email or password' ? 401 : 500;
+    console.error('Firebase login error:', error);
+    return NextResponse.json({ error: status === 401 ? message : 'Authentication service error' }, { status });
   }
 }

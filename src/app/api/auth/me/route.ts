@@ -1,62 +1,32 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { db } from '@/lib/db';
 import { requireUser, isNextResponse } from '@/lib/session';
+import { getFirebaseUserRecord } from '@/lib/firebase-repo';
+
+function calculateAge(birthday: unknown) {
+  if (!birthday) return null;
+  const birth = new Date(String(birthday));
+  if (Number.isNaN(birth.getTime())) return null;
+  const today = new Date();
+  let age = today.getFullYear() - birth.getFullYear();
+  const month = today.getMonth() - birth.getMonth();
+  if (month < 0 || (month === 0 && today.getDate() < birth.getDate())) age--;
+  return age;
+}
 
 export async function GET(request: NextRequest) {
   try {
     const auth = await requireUser(request);
     if (isNextResponse(auth)) return auth;
-    const userId = auth.userId;
-
-    const user = await db.user.findUnique({
-      where: { id: userId },
-      include: {
-        profile: true,
-        wallet: true,
-        kycSubmissions: true,
-      },
-    });
-
-    if (!user) {
-      return NextResponse.json(
-        { error: 'User not found' },
-        { status: 401 },
-      );
-    }
-
-    // Calculate age from birthday
-    let age: number | null = null;
-    if (user.profile?.birthday) {
-      const today = new Date();
-      const birth = new Date(user.profile.birthday);
-      age = today.getFullYear() - birth.getFullYear();
-      const m = today.getMonth() - birth.getMonth();
-      if (m < 0 || (m === 0 && today.getDate() < birth.getDate())) {
-        age--;
-      }
-    }
-
+    const record = await getFirebaseUserRecord(auth.userId);
+    if (!record?.user) return NextResponse.json({ error: 'User not found' }, { status: 401 });
     return NextResponse.json({
-      user: {
-        id: user.id,
-        name: user.name,
-        email: user.email,
-        role: user.role,
-        createdAt: user.createdAt,
-        updatedAt: user.updatedAt,
-      },
-      profile: {
-        ...user.profile,
-        age,
-      },
-      wallet: user.wallet,
-      kyc: user.kycSubmissions?.[0] || null,
+      user: record.user,
+      profile: record.profile ? { ...record.profile, age: calculateAge(record.profile.birthday) } : null,
+      wallet: record.wallet,
+      kyc: record.kyc,
     });
   } catch (error) {
-    console.error('Auth me error:', error);
-    return NextResponse.json(
-      { error: 'Internal server error' },
-      { status: 500 },
-    );
+    console.error('Firebase auth me error:', error);
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }

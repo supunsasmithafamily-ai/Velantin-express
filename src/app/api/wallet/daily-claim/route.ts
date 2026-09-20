@@ -1,40 +1,36 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { db } from '@/lib/db';
-import { requireUser, isNextResponse } from '@/lib/session';
+import { FieldValue } from 'firebase-admin/firestore';
+import { getFirebaseAdminFirestore } from '@/lib/firebase-admin';
+import { getFirebaseWallet } from '@/lib/firebase-repo';
+import { isNextResponse, requireUser } from '@/lib/session';
 
-const DAILY_BONUS_COINS = parseInt(process.env.DAILY_LOGIN_BONUS_COINS ?? '10', 10);
-const CLAIM_INTERVAL_MS = 24 * 60 * 60 * 1000; // 24 hours
-const STREAK_GRACE_MS = 48 * 60 * 60 * 1000; // claim within 48h of last = streak continues
+const BONUS = parseInt(process.env.DAILY_LOGIN_BONUS_COINS ?? '10', 10);
+const INTERVAL = 24 * 60 * 60 * 1000;
+const GRACE = 48 * 60 * 60 * 1000;
 
-// Status check only — used by the auto-popup modal to decide whether to
-// show itself, without mutating anything.
+function asDate(value: unknown): Date | null {
+  if (!value) return null;
+  if (value instanceof Date) return value;
+  if (typeof value === 'object' && value && typeof (value as { toDate?: unknown }).toDate === 'function') {
+    return (value as { toDate: () => Date }).toDate();
+  }
+  const date = new Date(String(value));
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
 export async function GET(request: NextRequest) {
   try {
     const auth = await requireUser(request);
     if (isNextResponse(auth)) return auth;
-    const userId = auth.userId;
-
-    const wallet = await db.wallet.findUnique({ where: { userId } });
-    if (!wallet) {
-      return NextResponse.json({ error: 'Wallet not found' }, { status: 404 });
-    }
-
-    const now = new Date();
-    let available = true;
-    let nextClaimAt: string | null = null;
-    if (wallet.lastDailyClaimAt) {
-      const elapsed = now.getTime() - wallet.lastDailyClaimAt.getTime();
-      if (elapsed < CLAIM_INTERVAL_MS) {
-        available = false;
-        nextClaimAt = new Date(wallet.lastDailyClaimAt.getTime() + CLAIM_INTERVAL_MS).toISOString();
-      }
-    }
-
+    const wallet = await getFirebaseWallet(auth.userId);
+    if (!wallet) return NextResponse.json({ error: 'Wallet not found' }, { status: 404 });
+    const last = asDate(wallet.lastDailyClaimAt);
+    const available = !last || Date.now() - last.getTime() >= INTERVAL;
     return NextResponse.json({
       available,
-      nextClaimAt,
-      streak: wallet.dailyStreak,
-      coinsOnClaim: DAILY_BONUS_COINS,
+      nextClaimAt: available || !last ? null : new Date(last.getTime() + INTERVAL).toISOString(),
+      streak: Number(wallet.dailyStreak ?? 0),
+      coinsOnClaim: BONUS,
     });
   } catch (error) {
     console.error('Daily claim status error:', error);
@@ -46,44 +42,44 @@ export async function POST(request: NextRequest) {
   try {
     const auth = await requireUser(request);
     if (isNextResponse(auth)) return auth;
-    const userId = auth.userId;
-
-    const wallet = await db.wallet.findUnique({ where: { userId } });
-    if (!wallet) {
-      return NextResponse.json({ error: 'Wallet not found' }, { status: 404 });
-    }
-
-    const now = new Date();
-    let newStreak = 1;
-    if (wallet.lastDailyClaimAt) {
-      const elapsed = now.getTime() - wallet.lastDailyClaimAt.getTime();
-      if (elapsed < CLAIM_INTERVAL_MS) {
-        const nextClaimAt = new Date(wallet.lastDailyClaimAt.getTime() + CLAIM_INTERVAL_MS);
-        return NextResponse.json(
-          { error: 'Already claimed today', nextClaimAt: nextClaimAt.toISOString() },
-          { status: 429 },
-        );
+    const firestore = getFirebaseAdminFirestore();
+    const result = await firestore.runTransaction(async (tx) => {
+      const ref = firestore.collection('wallets').doc(auth.userId);
+      const snap = await tx.get(ref);
+      if (!snap.exists) return { missing: true } as const;
+      const wallet = snap.data() ?? {};
+      const last = asDate(wallet.lastDailyClaimAt);
+      const now = Date.now();
+      if (last && now - last.getTime() < INTERVAL) {
+        return { already: true, nextClaimAt: new Date(last.getTime() + INTERVAL).toISOString() } as const;
       }
-      // Claimed within the grace window (24-48h) → streak continues.
-      // Longer gap → a day was missed, streak resets.
-      newStreak = elapsed <= STREAK_GRACE_MS ? wallet.dailyStreak + 1 : 1;
-    }
-
-    const updated = await db.wallet.update({
-      where: { userId },
-      data: {
-        coins: { increment: DAILY_BONUS_COINS },
-        lastDailyClaimAt: now,
-        dailyStreak: newStreak,
-      },
+      const streak = last && now - last.getTime() <= GRACE ? Number(wallet.dailyStreak ?? 0) + 1 : 1;
+      const coins = Number(wallet.coins ?? 0) + BONUS;
+      tx.set(ref, {
+        coins,
+        lifetimeEarned: Number(wallet.lifetimeEarned ?? 0) + BONUS,
+        lastDailyClaimAt: FieldValue.serverTimestamp(),
+        dailyStreak: streak,
+        updatedAt: FieldValue.serverTimestamp(),
+      }, { merge: true });
+      tx.set(firestore.collection('transactions').doc(), {
+        userId: auth.userId,
+        type: 'daily_claim',
+        coins: BONUS,
+        createdAt: FieldValue.serverTimestamp(),
+      });
+      return { coins, streak, already: false } as const;
     });
-
+    if ('missing' in result) return NextResponse.json({ error: 'Wallet not found' }, { status: 404 });
+    if ('already' in result && result.already) {
+      return NextResponse.json({ error: 'Already claimed today', nextClaimAt: result.nextClaimAt }, { status: 429 });
+    }
     return NextResponse.json({
       ok: true,
-      coinsAwarded: DAILY_BONUS_COINS,
-      coins: updated.coins,
-      streak: updated.dailyStreak,
-      nextClaimAt: new Date(now.getTime() + CLAIM_INTERVAL_MS).toISOString(),
+      coinsAwarded: BONUS,
+      coins: result.coins,
+      streak: result.streak,
+      nextClaimAt: new Date(Date.now() + INTERVAL).toISOString(),
     });
   } catch (error) {
     console.error('Daily claim error:', error);

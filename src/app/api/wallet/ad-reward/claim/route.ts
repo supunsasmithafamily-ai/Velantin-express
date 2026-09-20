@@ -1,72 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { db } from '@/lib/db';
-import { requireUser, isNextResponse, verifyAdRewardToken } from '@/lib/session';
-
-const AD_REWARD_COINS = parseInt(process.env.AD_REWARD_COINS ?? '5', 10);
-const AD_REWARD_COOLDOWN_MINUTES = parseInt(process.env.AD_REWARD_COOLDOWN_MINUTES ?? '2', 10);
-const AD_REWARD_DAILY_CAP = parseInt(process.env.AD_REWARD_DAILY_CAP ?? '12', 10);
-
-function todayStr(): string {
-  return new Date().toISOString().slice(0, 10); // YYYY-MM-DD (UTC)
-}
-
-export async function POST(request: NextRequest) {
-  try {
-    const auth = await requireUser(request);
-    if (isNextResponse(auth)) return auth;
-    const userId = auth.userId;
-
-    const body = await request.json();
-    const { token } = body;
-    if (!token || typeof token !== 'string') {
-      return NextResponse.json({ error: 'token is required' }, { status: 400 });
-    }
-
-    const valid = await verifyAdRewardToken(token, userId);
-    if (!valid) {
-      return NextResponse.json({ error: 'Invalid or expired ad session' }, { status: 400 });
-    }
-
-    const wallet = await db.wallet.findUnique({ where: { userId } });
-    if (!wallet) {
-      return NextResponse.json({ error: 'Wallet not found' }, { status: 404 });
-    }
-
-    const today = todayStr();
-    const claimedToday = wallet.adRewardsDate === today ? wallet.adRewardsToday : 0;
-    if (claimedToday >= AD_REWARD_DAILY_CAP) {
-      return NextResponse.json({ error: 'Daily ad reward limit reached' }, { status: 429 });
-    }
-
-    // Re-check cooldown at claim time too (not just at start) — closes the
-    // window where two "start" calls could each be followed by a "claim".
-    if (wallet.lastAdRewardAt) {
-      const cooldownMs = AD_REWARD_COOLDOWN_MINUTES * 60 * 1000;
-      const elapsed = Date.now() - wallet.lastAdRewardAt.getTime();
-      if (elapsed < cooldownMs) {
-        return NextResponse.json({ error: 'Ad reward on cooldown' }, { status: 429 });
-      }
-    }
-
-    const updated = await db.wallet.update({
-      where: { userId },
-      data: {
-        coins: { increment: AD_REWARD_COINS },
-        lastAdRewardAt: new Date(),
-        adRewardsToday: claimedToday + 1,
-        adRewardsDate: today,
-      },
-    });
-
-    return NextResponse.json({
-      ok: true,
-      coinsAwarded: AD_REWARD_COINS,
-      coins: updated.coins,
-      claimedToday: updated.adRewardsToday,
-      dailyCap: AD_REWARD_DAILY_CAP,
-    });
-  } catch (error) {
-    console.error('Ad reward claim error:', error);
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
-  }
-}
+import { FieldValue } from 'firebase-admin/firestore';
+import { getFirebaseAdminFirestore } from '@/lib/firebase-admin';
+import { isNextResponse, requireUser, verifyAdRewardToken } from '@/lib/session';
+const REWARD = parseInt(process.env.AD_REWARD_COINS ?? '5', 10); const COOLDOWN = parseInt(process.env.AD_REWARD_COOLDOWN_MINUTES ?? '2', 10); const CAP = parseInt(process.env.AD_REWARD_DAILY_CAP ?? '12', 10); const today = () => new Date().toISOString().slice(0, 10);
+function dateValue(value: unknown) { if (!value) return null; if (typeof value === 'object' && value && typeof (value as { toDate?: unknown }).toDate === 'function') return (value as { toDate: () => Date }).toDate(); const d = new Date(String(value)); return Number.isNaN(d.getTime()) ? null : d; }
+export async function POST(request: NextRequest) { try { const auth = await requireUser(request); if (isNextResponse(auth)) return auth; const { token } = await request.json(); if (!token || typeof token !== 'string') return NextResponse.json({ error: 'token is required' }, { status: 400 }); if (!await verifyAdRewardToken(token, auth.userId)) return NextResponse.json({ error: 'Invalid or expired ad session' }, { status: 400 }); const firestore = getFirebaseAdminFirestore(); const result = await firestore.runTransaction(async tx => { const ref = firestore.collection('wallets').doc(auth.userId); const snap = await tx.get(ref); if (!snap.exists) return { missing: true } as const; const w = snap.data() ?? {}; const claimed = w.adRewardsDate === today() ? Number(w.adRewardsToday ?? 0) : 0; if (claimed >= CAP) return { error: 'Daily ad reward limit reached' } as const; const last = dateValue(w.lastAdRewardAt); if (last && Date.now() - last.getTime() < COOLDOWN * 60000) return { error: 'Ad reward on cooldown' } as const; const coins = Number(w.coins ?? 0) + REWARD; tx.set(ref, { coins, lifetimeEarned: Number(w.lifetimeEarned ?? 0) + REWARD, lastAdRewardAt: FieldValue.serverTimestamp(), adRewardsToday: claimed + 1, adRewardsDate: today(), updatedAt: FieldValue.serverTimestamp() }, { merge: true }); tx.set(firestore.collection('transactions').doc(), { userId: auth.userId, type: 'ad_reward', coins: REWARD, createdAt: FieldValue.serverTimestamp() }); return { coins, claimedToday: claimed + 1 } as const; }); if ('missing' in result) return NextResponse.json({ error: 'Wallet not found' }, { status: 404 }); if ('error' in result) return NextResponse.json({ error: result.error }, { status: 429 }); return NextResponse.json({ ok: true, coinsAwarded: REWARD, coins: result.coins, claimedToday: result.claimedToday, dailyCap: CAP }); } catch (error) { console.error('Ad reward claim error:', error); return NextResponse.json({ error: 'Internal server error' }, { status: 500 }); } }
