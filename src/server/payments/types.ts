@@ -2,7 +2,7 @@
 // Payment Provider Abstraction Layer — Types & Factory
 // ---------------------------------------------------------------------------
 
-export type PaymentProvider = "paypal" | "dialog_genie" | "oxapay";
+export type PaymentProvider = "paypal" | "dialog_genie";
 
 // ---- Coin Purchase --------------------------------------------------------
 
@@ -90,12 +90,9 @@ function resolveProvider(name: PaymentProvider): PaymentProviderAdapter {
     case "dialog_genie":
       // eslint-disable-next-line @typescript-eslint/no-require-imports
       return require("./dialogGenie").dialogGenieProvider;
-    case "oxapay":
-      // eslint-disable-next-line @typescript-eslint/no-require-imports
-      return require("./oxapay").oxapayProvider;
     default:
       throw new Error(
-        `Unknown payment provider: "${name}". Supported: paypal, dialog_genie, oxapay`,
+        `Unknown payment provider: "${name}". Supported: paypal, dialog_genie`,
       );
   }
 }

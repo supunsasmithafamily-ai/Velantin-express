@@ -47,14 +47,6 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ ok: true, coins: order.coins });
     }
 
-    if (order.provider === 'oxapay') {
-      return NextResponse.json({
-        ok: false,
-        pending: true,
-        message: 'OxaPay will confirm the payment automatically once the blockchain transaction is verified.',
-      });
-    }
-
     // Verify with PayPal: GET /v2/checkout/orders/{id}
     const mode = process.env.PAYPAL_MODE ?? 'sandbox';
     const baseUrl = mode === 'live'
