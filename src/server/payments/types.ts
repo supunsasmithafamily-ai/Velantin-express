@@ -2,12 +2,13 @@
 // Payment Provider Abstraction Layer — Types & Factory
 // ---------------------------------------------------------------------------
 
-export type PaymentProvider = "paypal";
+export type PaymentProvider = "paypal" | "oxapay";
 
 // ---- Coin Purchase --------------------------------------------------------
 
 export interface CreateCoinPurchaseParams {
   userId: string;
+  orderId?: string;
   packId: string;
   amount: number; // price in minor units or float
   currency: string;
@@ -87,9 +88,12 @@ function resolveProvider(name: PaymentProvider): PaymentProviderAdapter {
     case "paypal":
       // eslint-disable-next-line @typescript-eslint/no-require-imports
       return require("./paypal").paypalProvider;
+    case "oxapay":
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      return require("./oxapay").oxapayProvider;
     default:
       throw new Error(
-        `Unknown payment provider: "${name}". Supported: paypal`,
+        `Unknown payment provider: "${name}". Supported: paypal, oxapay`,
       );
   }
 }

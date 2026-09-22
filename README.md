@@ -23,7 +23,7 @@ Fill in the Firebase Web values, Firebase Admin service-account values, Agora cr
 | Firebase browser | `NEXT_PUBLIC_FIREBASE_API_KEY`, `NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN`, `NEXT_PUBLIC_FIREBASE_PROJECT_ID`, `NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET`, `NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID`, `NEXT_PUBLIC_FIREBASE_APP_ID` |
 | Firebase server | `FIREBASE_PROJECT_ID`, `FIREBASE_CLIENT_EMAIL`, `FIREBASE_PRIVATE_KEY` |
 | Live video | `AGORA_APP_ID`, `AGORA_APP_CERTIFICATE` |
-| Payments | `PAYPAL_CLIENT_ID`, `PAYPAL_CLIENT_SECRET`, `PAYPAL_MODE`, `PAYPAL_WEBHOOK_ID` |
+| Payments | PayPal: `PAYPAL_CLIENT_ID`, `PAYPAL_CLIENT_SECRET`, `PAYPAL_MODE`, `PAYPAL_WEBHOOK_ID`; OxaPay coin purchases: `OXAPAY_MERCHANT_API_KEY`, `OXAPAY_CALLBACK_URL` |
 
 The Firebase Admin private key must remain server-only. In Vercel, paste it as one environment variable with escaped `\n` line breaks.
 
@@ -39,7 +39,7 @@ A host starts a stream through a Vercel API route and publishes video/audio thro
 
 ## Payments and rewards
 
-PayPal is the active coin-purchase and creator-cashout provider. PayPal webhooks credit coins only after provider verification. HilltopAds rewarded video and the daily login bonus are handled by the Vercel API routes with per-user cooldown/cap checks.
+PayPal is the default coin-purchase and creator-cashout provider. Set `PAYMENTS_BUY_PROVIDER=oxapay` to use OxaPay crypto invoices for coin purchases; its HMAC-signed `Paid` webhook credits coins only after confirmation. Cash-outs remain on PayPal because OxaPay payouts require a crypto wallet address, not a PayPal email. HilltopAds rewarded video and the daily login bonus are handled by the Vercel API routes with per-user cooldown/cap checks.
 
 ## Deployment
 

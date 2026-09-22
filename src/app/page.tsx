@@ -1129,8 +1129,12 @@ function WalletPage({ user, setUser }: { user: AuthUser; setUser: (msg: string) 
       const data = await res.json()
       if (data.approvalUrl) {
         window.open(data.approvalUrl, '_blank')
-        setPendingOrder({ orderId: data.orderId, providerRef: data.providerRef })
-        setMsg('Approve the payment in the PayPal window, then come back and tap "I\'ve completed payment".')
+        if (data.provider === 'oxapay') {
+          setMsg('OxaPay payment page opened. Complete the crypto payment; coins will be credited automatically after confirmation.')
+        } else {
+          setPendingOrder({ orderId: data.orderId, providerRef: data.providerRef })
+          setMsg('Approve the payment in the PayPal window, then come back and tap "I\'ve completed payment".')
+        }
       } else {
         setMsg(data.error || 'Failed to create order')
       }
@@ -1302,7 +1306,7 @@ function WalletPage({ user, setUser }: { user: AuthUser; setUser: (msg: string) 
         </div>
         <div className="ve-panel">
           <h3 style={{ marginTop: 0 }}>Coin packs</h3>
-          <p className="ve-warn">PayPal checkout — real payment required.</p>
+          <p className="ve-warn">Checkout provider: {process.env.NEXT_PUBLIC_PAYMENT_PROVIDER || 'PayPal'} — real payment required.</p>
           {COIN_PACKS.map(p => (
             <button key={p.id} className="ve-btn" style={{ marginRight: 8, marginTop: 8 }} onClick={() => handleBuy(p.id)} disabled={loading}>
               {p.coins} coins · {p.priceLabel}

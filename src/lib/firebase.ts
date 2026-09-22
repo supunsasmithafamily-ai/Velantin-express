@@ -1,7 +1,7 @@
 // Firebase configuration — uses NEXT_PUBLIC_ env vars for client-side access.
 // Firebase API keys are safe to expose; security is enforced by Firebase Security Rules.
 
-import { initializeApp, getApps } from "firebase/app";
+import { initializeApp, getApps, type FirebaseApp } from "firebase/app";
 import { getAuth } from "firebase/auth";
 import { getFirestore } from "firebase/firestore";
 import { getStorage } from "firebase/storage";
@@ -19,12 +19,15 @@ const firebaseConfig = {
   measurementId: process.env.NEXT_PUBLIC_FIREBASE_MEASUREMENT_ID,
 };
 
-const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApps()[0];
+const hasBrowserConfig = Boolean(firebaseConfig.apiKey && firebaseConfig.projectId && firebaseConfig.appId);
+const app: FirebaseApp | null = hasBrowserConfig
+  ? (getApps().length === 0 ? initializeApp(firebaseConfig) : getApps()[0])
+  : null;
 
 let analytics: ReturnType<typeof getAnalytics> | null = null;
 if (typeof window !== "undefined") {
   analyticsIsSupported().then((supported) => {
-    if (supported) analytics = getAnalytics(app);
+    if (supported && app) analytics = getAnalytics(app);
   });
 }
 
@@ -39,6 +42,7 @@ let messagingInstance: Messaging | null = null;
 
 export async function getFirebaseMessaging(): Promise<Messaging | null> {
   if (typeof window === "undefined") return null;
+  if (!app) return null;
   if (messagingInstance) return messagingInstance;
 
   const supported = await messagingIsSupported().catch(() => false);
@@ -49,6 +53,6 @@ export async function getFirebaseMessaging(): Promise<Messaging | null> {
 }
 
 export { app, analytics };
-export const auth = getAuth(app);
-export const firestore = getFirestore(app);
-export const storage = getStorage(app);
+export const auth = app ? getAuth(app) : null;
+export const firestore = app ? getFirestore(app) : null;
+export const storage = app ? getStorage(app) : null;
