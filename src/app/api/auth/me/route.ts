@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireUser, isNextResponse } from '@/lib/session';
-import { getFirebaseUserRecord } from '@/lib/firebase-repo';
+import { getFirebaseUserRecord, listFirebaseSubscriptions } from '@/lib/firebase-repo';
 
 function calculateAge(birthday: unknown) {
   if (!birthday) return null;
@@ -24,6 +24,7 @@ export async function GET(request: NextRequest) {
       profile: record.profile ? { ...record.profile, age: calculateAge(record.profile.birthday) } : null,
       wallet: record.wallet,
       kyc: record.kyc,
+      subscriptions: await listFirebaseSubscriptions(auth.userId),
     });
   } catch (error) {
     console.error('Firebase auth me error:', error);

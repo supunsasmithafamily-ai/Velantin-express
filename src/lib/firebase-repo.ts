@@ -1,6 +1,7 @@
 import { randomUUID } from 'crypto';
 import { FieldValue, type DocumentReference, type Transaction } from 'firebase-admin/firestore';
 import { getFirebaseAdminFirestore } from '@/lib/firebase-admin';
+import { getSubscriptionPlan, type SubscriptionPlanId } from '@/lib/monetization';
 
 export type FirestoreUser = {
   id: string;
@@ -34,6 +35,8 @@ export type FirebaseLiveStream = {
   hostId: string;
   title: string;
   status: string;
+  accessType?: 'public' | 'paid' | 'subscribers';
+  entryPriceCoins?: number;
   createdAt?: Date | string | null;
   endedAt?: Date | string | null;
   [key: string]: unknown;
@@ -177,6 +180,135 @@ export async function listActiveFirebaseLiveStreams(cutoff: Date) {
     .filter((stream) => dateValue(stream.createdAt) > cutoff.getTime())
     .sort((a, b) => dateValue(b.createdAt) - dateValue(a.createdAt))
     .slice(0, 50);
+}
+
+export async function getFirebaseSubscription(subscriberId: string, creatorId: string) {
+  const id = `${subscriberId}_${creatorId}`;
+  const snapshot = await getFirebaseAdminFirestore().collection('subscriptions').doc(id).get();
+  return snapshot.exists ? recordFromSnapshot(snapshot) : null;
+}
+
+export async function listFirebaseSubscriptions(subscriberId: string) {
+  const snapshots = await getFirebaseAdminFirestore()
+    .collection('subscriptions')
+    .where('subscriberId', '==', subscriberId)
+    .get();
+  const now = Date.now();
+  return Promise.all(snapshots.docs
+    .map((snapshot) => recordFromSnapshot(snapshot))
+    .filter((subscription) => subscription.status === 'active' && dateValue(subscription.expiresAt) > now)
+    .sort((a, b) => dateValue(b.expiresAt) - dateValue(a.expiresAt))
+    .map(async (subscription) => {
+      const creatorSnapshot = await userRef(String(subscription.creatorId ?? '')).get();
+      return {
+        ...subscription,
+        creatorName: String(creatorSnapshot.data()?.name ?? 'Creator'),
+      };
+    }));
+}
+
+export async function canAccessFirebaseLiveStream(userId: string, liveId: string) {
+  const stream = await getFirebaseLiveStream(liveId);
+  if (!stream || stream.status !== 'active') return { allowed: false as const, reason: 'not_found' as const, stream: null };
+  if (stream.hostId === userId || stream.accessType === 'public') {
+    return { allowed: true as const, reason: 'public' as const, stream };
+  }
+  if (stream.accessType === 'paid') {
+    const access = await getFirebaseAdminFirestore().collection('liveRoomAccess').doc(`${liveId}_${userId}`).get();
+    return access.exists
+      ? { allowed: true as const, reason: 'paid' as const, stream }
+      : { allowed: false as const, reason: 'payment_required' as const, stream };
+  }
+  if (stream.accessType === 'subscribers') {
+    const subscription = await getFirebaseSubscription(userId, stream.hostId);
+    const active = subscription?.status === 'active' && dateValue(subscription.expiresAt) > Date.now();
+    return active
+      ? { allowed: true as const, reason: 'subscriber' as const, stream }
+      : { allowed: false as const, reason: 'subscription_required' as const, stream };
+  }
+  return { allowed: true as const, reason: 'public' as const, stream };
+}
+
+export async function grantFirebaseLiveRoomAccess(userId: string, liveId: string) {
+  const firestore = getFirebaseAdminFirestore();
+  return firestore.runTransaction(async (transaction) => {
+    const streamRef = firestore.collection('liveStreams').doc(liveId);
+    const walletRef = firestore.collection('wallets').doc(userId);
+    const accessRef = firestore.collection('liveRoomAccess').doc(`${liveId}_${userId}`);
+    const streamSnapshot = await transaction.get(streamRef);
+    const walletSnapshot = await transaction.get(walletRef);
+    const accessSnapshot = await transaction.get(accessRef);
+    if (!streamSnapshot.exists || streamSnapshot.data()?.status !== 'active') throw new Error('ROOM_NOT_FOUND');
+    const stream = streamFromSnapshot(streamSnapshot as unknown as FirebaseLiveStreamSnapshot);
+    if (stream.hostId === userId || stream.accessType === 'public') return { alreadyGranted: true, priceCoins: 0 };
+    if (stream.accessType !== 'paid') throw new Error('SUBSCRIPTION_REQUIRED');
+    if (accessSnapshot.exists) return { alreadyGranted: true, priceCoins: Number(stream.entryPriceCoins ?? 0) };
+    if (!walletSnapshot.exists) throw new Error('WALLET_NOT_FOUND');
+    const wallet = normalizeFirestoreData(walletSnapshot.data() as FirestoreRecord) ?? {};
+    const priceCoins = Number(stream.entryPriceCoins ?? 0);
+    if (Number(wallet.coins ?? 0) < priceCoins) throw new Error('INSUFFICIENT_COINS');
+    transaction.update(walletRef, {
+      coins: Number(wallet.coins ?? 0) - priceCoins,
+      updatedAt: FieldValue.serverTimestamp(),
+    });
+    transaction.set(accessRef, {
+      id: accessRef.id,
+      liveId,
+      userId,
+      hostId: stream.hostId,
+      priceCoins,
+      createdAt: FieldValue.serverTimestamp(),
+    });
+    transaction.set(firestore.collection('transactions').doc(newId()), {
+      id: newId(), userId, type: 'private_room_entry', liveId, hostId: stream.hostId,
+      coins: -priceCoins, createdAt: FieldValue.serverTimestamp(),
+    });
+    return { alreadyGranted: false, priceCoins };
+  });
+}
+
+export async function subscribeFirebaseToCreator(subscriberId: string, creatorId: string, planId: SubscriptionPlanId) {
+  if (subscriberId === creatorId) throw new Error('CANNOT_SUBSCRIBE_SELF');
+  const plan = getSubscriptionPlan(planId);
+  if (!plan) throw new Error('INVALID_SUBSCRIPTION_PLAN');
+  const firestore = getFirebaseAdminFirestore();
+  return firestore.runTransaction(async (transaction) => {
+    const creatorRef = userRef(creatorId);
+    const walletRef = firestore.collection('wallets').doc(subscriberId);
+    const subscriptionRef = firestore.collection('subscriptions').doc(`${subscriberId}_${creatorId}`);
+    const [creatorSnapshot, walletSnapshot, subscriptionSnapshot] = await Promise.all([
+      transaction.get(creatorRef), transaction.get(walletRef), transaction.get(subscriptionRef),
+    ]);
+    if (!creatorSnapshot.exists) throw new Error('CREATOR_NOT_FOUND');
+    if (!walletSnapshot.exists) throw new Error('WALLET_NOT_FOUND');
+    const wallet = normalizeFirestoreData(walletSnapshot.data() as FirestoreRecord) ?? {};
+    const priceCoins = plan.priceCoins;
+    if (Number(wallet.coins ?? 0) < priceCoins) throw new Error('INSUFFICIENT_COINS');
+    const existing = subscriptionSnapshot.exists ? recordFromSnapshot(subscriptionSnapshot) : null;
+    const existingExpiry = existing ? dateValue(existing.expiresAt) : 0;
+    const startsAt = Math.max(Date.now(), existingExpiry);
+    const expiresAt = new Date(startsAt + plan.durationDays * 24 * 60 * 60 * 1000);
+    transaction.update(walletRef, {
+      coins: Number(wallet.coins ?? 0) - priceCoins,
+      updatedAt: FieldValue.serverTimestamp(),
+    });
+    transaction.set(subscriptionRef, {
+      id: subscriptionRef.id,
+      subscriberId,
+      creatorId,
+      planId,
+      priceCoins,
+      status: 'active',
+      startedAt: existingExpiry > Date.now() ? (existing?.startedAt ?? FieldValue.serverTimestamp()) : FieldValue.serverTimestamp(),
+      expiresAt,
+      updatedAt: FieldValue.serverTimestamp(),
+    }, { merge: true });
+    transaction.set(firestore.collection('transactions').doc(newId()), {
+      id: newId(), userId: subscriberId, type: 'creator_subscription', creatorId, planId,
+      coins: -priceCoins, expiresAt, createdAt: FieldValue.serverTimestamp(),
+    });
+    return { planId, priceCoins, expiresAt };
+  });
 }
 
 function dateValue(value: unknown) {

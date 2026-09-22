@@ -499,6 +499,8 @@ a { color: inherit; text-decoration: none; }
 
 .ve-grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 @media (max-width: 720px) { .ve-grid-2 { grid-template-columns: 1fr; } }
+.ve-grid-3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+@media (max-width: 900px) { .ve-grid-3 { grid-template-columns: 1fr; } }
 
 .ve-mobile-tabs {
   display: none;

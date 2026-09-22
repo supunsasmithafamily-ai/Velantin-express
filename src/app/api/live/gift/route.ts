@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { FieldValue } from '@/lib/firebase-repo';
 import { getFirebaseAdminFirestore } from '@/lib/firebase-admin';
 import { isNextResponse, requireUser } from '@/lib/session';
+import { canAccessFirebaseLiveStream } from '@/lib/firebase-repo';
 
 const GIFT_CATALOG: Record<string, { name: string; coins: number }> = {
   rose: { name: 'Rose', coins: 10 }, heart: { name: 'Heart', coins: 25 }, kiss: { name: 'Kiss', coins: 40 }, letter: { name: 'Love Letter', coins: 60 }, bouquet: { name: 'Bouquet', coins: 120 }, teddy: { name: 'Teddy Bear', coins: 180 }, chocolate: { name: 'Chocolate Box', coins: 220 }, spotlight: { name: 'Spotlight', coins: 300 }, fireworks: { name: 'Fireworks', coins: 500 }, ring: { name: 'Diamond Ring', coins: 700 }, crown: { name: 'Crown', coins: 900 },
@@ -19,6 +20,12 @@ export async function POST(request: NextRequest) {
     const giftId = String(body.giftId || '');
     const gift = GIFT_CATALOG[giftId];
     if (!liveId || !gift) return NextResponse.json({ error: 'Unknown gift' }, { status: 400 });
+    const access = await canAccessFirebaseLiveStream(auth.userId, liveId);
+    if (!access.allowed) {
+      if (access.reason === 'payment_required') return NextResponse.json({ error: 'Unlock this private room before sending gifts', code: access.reason }, { status: 402 });
+      if (access.reason === 'subscription_required') return NextResponse.json({ error: 'Subscribe to this creator before sending gifts', code: access.reason }, { status: 403 });
+      return NextResponse.json({ error: 'Live stream not found' }, { status: 404 });
+    }
     const firestore = getFirebaseAdminFirestore();
     const streamSnapshot = await firestore.collection('liveStreams').doc(liveId).get();
     if (!streamSnapshot.exists || streamSnapshot.data()?.status !== 'active') return NextResponse.json({ error: 'Live stream not found' }, { status: 404 });

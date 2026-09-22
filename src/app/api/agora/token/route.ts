@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { RtcTokenBuilder, RtcRole, RtmTokenBuilder } from 'agora-token';
 import { requireUser, isNextResponse } from '@/lib/session';
+import { canAccessFirebaseLiveStream } from '@/lib/firebase-repo';
 
 // Tokens are short-lived (1 hour) — the client re-requests a fresh one each
 // time it joins a channel, so we never need to worry about long-term leaks.
@@ -26,8 +27,16 @@ export async function POST(request: NextRequest) {
     if (!channelName) {
       return NextResponse.json({ error: 'channelName is required' }, { status: 400 });
     }
-    // 'host' = broadcaster (going live), 'audience' = viewer (watching).
-    const role = body.role === 'host' ? RtcRole.PUBLISHER : RtcRole.SUBSCRIBER;
+    const access = await canAccessFirebaseLiveStream(userId, channelName);
+    if (!access.allowed) {
+      if (access.reason === 'payment_required') return NextResponse.json({ error: 'This private room requires a one-time entry payment.', code: access.reason }, { status: 402 });
+      if (access.reason === 'subscription_required') return NextResponse.json({ error: 'This room is available to active subscribers only.', code: access.reason, creatorId: access.stream?.hostId }, { status: 403 });
+      return NextResponse.json({ error: 'Live stream not found or already ended.', code: access.reason }, { status: 404 });
+    }
+
+    // Only the room owner may publish. Never trust a client-provided role.
+    const isHost = access.stream.hostId === userId;
+    const role = isHost ? RtcRole.PUBLISHER : RtcRole.SUBSCRIBER;
 
     const now = Math.floor(Date.now() / 1000);
     const expireAt = now + TOKEN_TTL_SECONDS;

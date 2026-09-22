@@ -10,7 +10,15 @@ export async function GET() {
     const streams = await listActiveFirebaseLiveStreams(new Date(Date.now() - STALE_AFTER_MS));
     const lives = await Promise.all(streams.map(async (stream) => {
       const hostSnapshot = await firestore.collection('users').doc(stream.hostId).get();
-      return { id: stream.id, hostId: stream.hostId, host: String(hostSnapshot.data()?.name ?? 'Host'), title: stream.title, viewers: 0 };
+      return {
+        id: stream.id,
+        hostId: stream.hostId,
+        host: String(hostSnapshot.data()?.name ?? 'Host'),
+        title: stream.title,
+        viewers: 0,
+        accessType: stream.accessType ?? 'public',
+        entryPriceCoins: Number(stream.entryPriceCoins ?? 0),
+      };
     }));
     return NextResponse.json({ lives });
   } catch (error) {

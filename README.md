@@ -29,17 +29,17 @@ The Firebase Admin private key must remain server-only. In Vercel, paste it as o
 
 ## Firebase collections
 
-The server uses Firestore collections for `users`, `profiles`, `wallets`, `liveStreams`, `liveGifts`, `liveComments`, `statuses`, `kycSubmissions`, `cashoutRequests`, `coinOrders`, `transactions`, and notification data. Wallet changes and gift/cashout/reward operations use Firestore transactions.
+The server uses Firestore collections for `users`, `profiles`, `wallets`, `liveStreams`, `liveGifts`, `liveComments`, `liveRoomAccess`, `subscriptions`, `statuses`, `kycSubmissions`, `cashoutRequests`, `coinOrders`, `transactions`, and notification data. Wallet changes, room unlocks, subscriptions, gifts, cash-outs, and rewards use Firestore transactions.
 
 Uploads use short-lived Firebase Storage signed URLs. The browser compresses images before uploading avatar, KYC, and status files directly to Firebase Storage.
 
 ## Live features
 
-A host starts a stream through a Vercel API route and publishes video/audio through Agora RTC. Other users discover active streams through `/api/live/list`, join the Agora channel as viewers, and can send gifts through the authenticated gift API. Agora RTM carries comments inside the live room. The app does not need `NEXT_PUBLIC_WS_URL` or a persistent server.
+A host starts a stream through a Vercel API route and publishes video/audio through Agora RTC. Each room can be public, paid-entry (25–10,000 coins for a one-time pass), or subscriber-only. Paid-room access is recorded in `liveRoomAccess`; subscriber-only access is checked against the creator membership in `subscriptions` before an Agora token is issued. Other users discover active streams through `/api/live/list`, join the Agora channel as viewers, and can send gifts through the authenticated gift API. Agora RTM carries comments inside the live room. The app does not need `NEXT_PUBLIC_WS_URL` or a persistent server.
 
 ## Payments and rewards
 
-PayPal is the default coin-purchase and creator-cashout provider. Set `PAYMENTS_BUY_PROVIDER=oxapay` to use OxaPay crypto invoices for coin purchases; its HMAC-signed `Paid` webhook credits coins only after confirmation. Cash-outs remain on PayPal because OxaPay payouts require a crypto wallet address, not a PayPal email. HilltopAds rewarded video and the daily login bonus are handled by the Vercel API routes with per-user cooldown/cap checks.
+PayPal is the default coin-purchase and creator-cashout provider. Set `PAYMENTS_BUY_PROVIDER=oxapay` to use OxaPay crypto invoices for coin purchases; its HMAC-signed `Paid` webhook credits coins only after confirmation. Cash-outs remain on PayPal because OxaPay payouts require a crypto wallet address, not a PayPal email. Paid rooms and subscriptions spend coins already purchased through either provider, so no second card-billing integration is required. Memberships last 30 days and renew manually; there is no automatic recurring charge. HilltopAds rewarded video and the daily login bonus are handled by the Vercel API routes with per-user cooldown/cap checks.
 
 ## Deployment
 

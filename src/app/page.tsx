@@ -14,7 +14,9 @@ import {
   UserRound as LucideUserRound,
   Shield as LucideShield,
   LogOut as LucideLogOut,
+  Crown as LucideCrown,
 } from 'lucide-react'
+import { SUBSCRIPTION_PLANS } from '@/lib/monetization'
 
 // ============ TURN SERVER (from env via NEXT_PUBLIC) ============
 const ICE_CONFIG: RTCConfiguration = {
@@ -72,13 +74,15 @@ function diamondsToUsd(diamonds: number) {
 
 // ============ TYPES ============
 
-type Page = 'landing' | 'register' | 'home' | 'chats' | 'thread' | 'live' | 'liveStage' | 'status' | 'wallet' | 'verify' | 'admin' | 'profile' | 'publicProfile'
+type Page = 'landing' | 'register' | 'home' | 'chats' | 'thread' | 'live' | 'liveStage' | 'status' | 'wallet' | 'subscriptions' | 'verify' | 'admin' | 'profile' | 'publicProfile'
 
 type NetUser = { id: string; name: string; email: string }
 type NetChat = { id: string; name: string; group: boolean; last: string; time: string; memberIds?: string[] }
 type NetMsg = { id: string; fromId?: string; from: string; text: string; at: string }
-type NetLive = { id: string; hostId: string; host: string; title: string; viewers: number }
+type NetLive = { id: string; hostId: string; host: string; title: string; viewers: number; accessType?: 'public' | 'paid' | 'subscribers'; entryPriceCoins?: number }
 type NetComment = { user: string; text: string }
+type NetSubscription = { id: string; creatorId: string; creatorName: string; planId: string; expiresAt: string | Date }
+type RoomAccess = 'public' | 'paid' | 'subscribers'
 
 // ============ AUTH CONTEXT ============
 
@@ -87,6 +91,7 @@ type AuthUser = {
   coins: number; diamonds: number; lifetimeEarned: number
   avatarUrl?: string; paypalEmail?: string
   kycStatus: string
+  subscriptions?: NetSubscription[]
   bio?: string; birthday?: string; city?: string; gender?: string; age?: number
 }
 
@@ -198,6 +203,7 @@ function Shell({ page, setPage, threadChatId, setThreadChatId, user, setUser, ne
     { to: 'chats' as Page, label: 'Chats', Icon: LucideMessageCircle },
     { to: 'live' as Page, label: 'Live', Icon: LucideRadio },
     { to: 'wallet' as Page, label: 'Wallet', Icon: LucideWallet },
+    { to: 'subscriptions' as Page, label: 'Subscriptions', Icon: LucideCrown },
     { to: 'verify' as Page, label: 'Verify', Icon: LucideShieldCheck },
     { to: 'profile' as Page, label: 'Profile', Icon: LucideUserRound },
   ]
@@ -296,6 +302,7 @@ function Shell({ page, setPage, threadChatId, setThreadChatId, user, setUser, ne
         {page === 'thread' && threadChatId && <ThreadPage chatId={threadChatId} netState={netState} user={user} />}
         {page === 'live' && <LivePage netState={netState} user={user} setPage={setPage} setThreadChatId={setThreadChatId} goToLive={goToLive} registerLive={registerLive} />}
         {page === 'liveStage' && <LiveStagePage netState={netState} user={user} setPage={setPage} refreshUser={refreshUser} />}
+        {page === 'subscriptions' && <SubscriptionsPage user={user} refreshUser={refreshUser} />}
         {page === 'wallet' && <WalletPage user={user} setUser={setStatusMsg} />}
         {page === 'verify' && <VerifyPage user={user} setUser={setStatusMsg} />}
         {page === 'status' && <StatusPage netState={netState} user={user} />}
@@ -574,6 +581,8 @@ function LivePage({ netState, user, setPage, setThreadChatId, goToLive, register
   const [camStatus, setCamStatus] = useState<'loading' | 'ready' | 'blocked'>('loading')
   const [starting, setStarting] = useState(false)
   const [startError, setStartError] = useState<string | null>(null)
+  const [accessType, setAccessType] = useState<RoomAccess>('public')
+  const [entryPriceCoins, setEntryPriceCoins] = useState(100)
 
   // Start the camera preview immediately (full screen), before the user
   // even taps "Go live" — no title screen, no extra step in between.
@@ -610,7 +619,7 @@ function LivePage({ netState, user, setPage, setThreadChatId, goToLive, register
     try {
       const res = await authFetch('/api/live/start', {
         method: 'POST',
-        body: JSON.stringify({ title: `${user.name} live` }),
+        body: JSON.stringify({ title: `${user.name} live`, accessType, entryPriceCoins }),
       })
       const data = await res.json()
       if (!res.ok) throw new Error(data.error || 'Could not start the live stream')
@@ -618,7 +627,7 @@ function LivePage({ netState, user, setPage, setThreadChatId, goToLive, register
       // takes over the camera from here.
       previewStreamRef.current?.getTracks().forEach(t => t.stop())
       previewStreamRef.current = null
-      registerLive({ id: data.id, hostId: data.hostId, host: data.host, title: data.title, viewers: 0 })
+      registerLive({ id: data.id, hostId: data.hostId, host: data.host, title: data.title, viewers: 0, accessType: data.accessType, entryPriceCoins: data.entryPriceCoins })
       setThreadChatId(null)
       goToLive(data.id)
     } catch (err) {
@@ -643,6 +652,27 @@ function LivePage({ netState, user, setPage, setThreadChatId, goToLive, register
           </div>
 
           <div style={{ position: 'absolute', left: 0, right: 0, bottom: 28, display: 'grid', placeItems: 'center', gap: 14 }}>
+            <div className="ve-panel" style={{ width: 'min(92vw, 420px)', background: 'rgba(42, 10, 18, .82)', color: 'white' }}>
+              <p style={{ margin: 0, fontWeight: 700 }}>Room access</p>
+              <select className="ve-field" value={accessType} onChange={e => setAccessType(e.target.value as RoomAccess)} style={{ marginTop: 8 }}>
+                <option value="public">Public — anyone can join</option>
+                <option value="paid">Paid private — one-time entry</option>
+                <option value="subscribers">Subscribers only — membership required</option>
+              </select>
+              {accessType === 'paid' && (
+                <input
+                  className="ve-field"
+                  type="number"
+                  min={25}
+                  max={10000}
+                  step={1}
+                  value={entryPriceCoins}
+                  onChange={e => setEntryPriceCoins(Math.max(25, Math.min(10000, Number(e.target.value) || 25)))}
+                  placeholder="Entry price in coins"
+                  aria-label="Private room entry price in coins"
+                />
+              )}
+            </div>
             <button
               className="ve-btn ve-btn-primary"
               style={{ padding: '16px 40px', fontSize: 16, borderRadius: 999 }}
@@ -659,7 +689,7 @@ function LivePage({ netState, user, setPage, setThreadChatId, goToLive, register
               <div style={{ display: 'flex', gap: 10, overflowX: 'auto', maxWidth: '92vw', padding: '0 12px' }}>
                 {netState.lives.map(l => (
                   <button key={l.id} className="ve-badge" style={{ whiteSpace: 'nowrap' }} onClick={() => goToLive(l.id)}>
-                    <span className="ve-live-dot" /> {l.host} · {l.viewers} watching
+                    <span className="ve-live-dot" /> {l.host} · {l.viewers} watching {l.accessType === 'paid' ? `· 🔒 ${l.entryPriceCoins} coins` : l.accessType === 'subscribers' ? '· ♛ Subscribers' : ''}
                   </button>
                 ))}
               </div>
@@ -688,6 +718,10 @@ function LiveStagePage({ netState, user, setPage, refreshUser }: {
   const [comments, setComments] = useState<{ user: string; text: string }[]>([])
   const [giftFlash, setGiftFlash] = useState<string | null>(null)
   const [sendingGift, setSendingGift] = useState<string | null>(null)
+  const [unlockedRoomId, setUnlockedRoomId] = useState<string | null>(null)
+  const [accessError, setAccessError] = useState<string | null>(null)
+  const [unlocking, setUnlocking] = useState(false)
+  const accessReady = Boolean(live && (isHost || (live.accessType ?? 'public') === 'public' || unlockedRoomId === liveId))
 
   // Agora RTC (video) + RTM (chat/gifts) clients live in refs so they
   // survive re-renders without re-triggering the join effect.
@@ -697,7 +731,7 @@ function LiveStagePage({ netState, user, setPage, refreshUser }: {
   const giftFlashTimeout = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   useEffect(() => {
-    if (!liveId) return
+    if (!liveId || !accessReady) return
     let cancelled = false
 
     ;(async () => {
@@ -784,7 +818,7 @@ function LiveStagePage({ netState, user, setPage, refreshUser }: {
         rtm.logout().catch(() => {})
       }
     }
-  }, [liveId, isHost])
+  }, [liveId, isHost, accessReady])
 
   function sendComment() {
     const trimmed = text.trim()
@@ -820,12 +854,87 @@ function LiveStagePage({ netState, user, setPage, refreshUser }: {
     }
   }
 
+  async function unlockPaidRoom() {
+    if (!liveId || unlocking) return
+    setUnlocking(true)
+    setAccessError(null)
+    try {
+      const res = await authFetch('/api/live/access', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ liveId }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || 'Could not unlock this room')
+      setUnlockedRoomId(liveId)
+      refreshUser('refresh')
+    } catch (error) {
+      setAccessError(error instanceof Error ? error.message : 'Could not unlock this room')
+    } finally {
+      setUnlocking(false)
+    }
+  }
+
+  async function subscribeToRoom(planId: string) {
+    if (!live || unlocking) return
+    setUnlocking(true)
+    setAccessError(null)
+    try {
+      const res = await authFetch('/api/subscriptions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ creatorId: live.hostId, planId }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || 'Could not activate subscription')
+      setUnlockedRoomId(liveId)
+      refreshUser('refresh')
+    } catch (error) {
+      setAccessError(error instanceof Error ? error.message : 'Could not activate subscription')
+    } finally {
+      setUnlocking(false)
+    }
+  }
+
   if (!live) {
     return (
       <section className="ve-stage" style={{ gridColumn: '2 / -1' }}>
         <div className="ve-topbar">This live has ended.</div>
         <div style={{ padding: 20 }}>
           <button className="ve-btn" onClick={() => setPage('live')}>Back to Live</button>
+        </div>
+      </section>
+    )
+  }
+
+  if (!accessReady) {
+    const accessType = live.accessType ?? 'public'
+    return (
+      <section className="ve-stage" style={{ gridColumn: '2 / -1' }}>
+        <div className="ve-topbar"><strong>{live.host}&apos;s private room</strong><button className="ve-btn" onClick={() => setPage('live')}>← Back</button></div>
+        <div style={{ padding: 20, maxWidth: 760 }}>
+          <div className="ve-panel">
+            <span className="ve-badge">{accessType === 'paid' ? '🔒 Paid private room' : '♛ Subscribers only'}</span>
+            <h2 style={{ marginBottom: 6 }}>{live.title}</h2>
+            <p className="ve-muted">{accessType === 'paid' ? `Unlock this live for ${live.entryPriceCoins ?? 0} coins. The pass is valid for this room while it is live.` : 'Choose a 30-day membership to join this creator\'s subscriber-only live rooms.'}</p>
+            {accessError && <p className="ve-err" style={{ marginTop: 12 }}>{accessError}</p>}
+            {accessType === 'paid' ? (
+              <button className="ve-btn ve-btn-primary" style={{ marginTop: 16 }} disabled={unlocking} onClick={unlockPaidRoom}>
+                {unlocking ? 'Unlocking…' : `Unlock for ${live.entryPriceCoins ?? 0} coins`}
+              </button>
+            ) : (
+              <div className="ve-grid-3" style={{ marginTop: 16 }}>
+                {SUBSCRIPTION_PLANS.map(plan => (
+                  <div key={plan.id} className="ve-panel" style={{ padding: 14 }}>
+                    <strong>{plan.name}</strong>
+                    <p className="ve-stat" style={{ fontSize: 24, margin: '10px 0 4px' }}>{plan.priceCoins.toLocaleString()} coins</p>
+                    <p className="ve-muted" style={{ minHeight: 48 }}>{plan.description}</p>
+                    <button className="ve-btn ve-btn-primary" disabled={unlocking} onClick={() => subscribeToRoom(plan.id)}>Subscribe</button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
       </section>
     )
@@ -1328,6 +1437,60 @@ function WalletPage({ user, setUser }: { user: AuthUser; setUser: (msg: string) 
           <button className="ve-btn ve-btn-primary" style={{ marginTop: 10 }} onClick={handleCashout} disabled={loading}>
             Request cash-out
           </button>
+        </div>
+      </div>
+    </section>
+  )
+}
+
+function SubscriptionsPage({ user, refreshUser }: { user: AuthUser; refreshUser: (msg: string) => void }) {
+  const [subscriptions, setSubscriptions] = useState<NetSubscription[]>(user.subscriptions ?? [])
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    authFetch('/api/subscriptions').then(r => r.ok ? r.json() : null).then(data => {
+      if (data?.subscriptions) setSubscriptions(data.subscriptions)
+    }).catch(() => {}).finally(() => setLoading(false))
+  }, [])
+
+  return (
+    <section className="ve-stage" style={{ gridColumn: '2 / -1' }}>
+      <div className="ve-topbar"><strong>Subscriptions</strong><span className="ve-muted">Use coins to support creators</span></div>
+      <div style={{ padding: 20 }}>
+        <div className="ve-panel" style={{ marginBottom: 14 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', gap: 16, alignItems: 'center', flexWrap: 'wrap' }}>
+            <div>
+              <h2 style={{ margin: 0 }}>Creator memberships</h2>
+              <p className="ve-muted" style={{ marginBottom: 0 }}>Subscribe from a subscriber-only live room to unlock that creator&apos;s private lives for 30 days.</p>
+            </div>
+            <button className="ve-btn" onClick={() => refreshUser('refresh')}>Refresh balance</button>
+          </div>
+        </div>
+        <div className="ve-grid-3">
+          {SUBSCRIPTION_PLANS.map(plan => (
+            <div className="ve-panel" key={plan.id}>
+              <span className="ve-badge"><LucideCrown size={14} /> {plan.name}</span>
+              <p className="ve-stat" style={{ marginTop: 14 }}>{plan.priceCoins.toLocaleString()} coins</p>
+              <p className="ve-muted">{plan.description}</p>
+              <p className="ve-muted" style={{ fontSize: 12 }}>30-day access · renews manually</p>
+            </div>
+          ))}
+        </div>
+        <div className="ve-panel" style={{ marginTop: 14 }}>
+          <h3 style={{ marginTop: 0 }}>Your active subscriptions</h3>
+          {loading ? <p className="ve-muted">Loading…</p> : subscriptions.length === 0 ? (
+            <p className="ve-muted">No active memberships yet. Join a subscriber-only live room to get started.</p>
+          ) : (
+            <div className="ve-list" style={{ maxHeight: 280 }}>
+              {subscriptions.map(subscription => (
+                <div className="ve-row" key={subscription.id} style={{ cursor: 'default' }}>
+                  <div className="ve-avatar"><LucideCrown size={18} /></div>
+                  <div style={{ flex: 1 }}><strong>{subscription.creatorName}</strong><span>{subscription.planId} · active until {new Date(subscription.expiresAt).toLocaleDateString()}</span></div>
+                  <span className="ve-ok">Active</span>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       </div>
     </section>
@@ -1916,6 +2079,7 @@ function HomeInner() {
           id: meData.user.id, name: meData.user.name, email: meData.user.email, role: meData.user.role,
           coins: meData.wallet?.coins ?? 0, diamonds: meData.wallet?.diamonds ?? 0, lifetimeEarned: meData.wallet?.lifetimeEarned ?? 0,
           avatarUrl: meData.profile?.avatarUrl, paypalEmail: meData.profile?.paypalEmail, kycStatus: meData.kyc?.status ?? 'none',
+          subscriptions: meData.subscriptions ?? [],
           bio: meData.profile?.bio, birthday: meData.profile?.birthday, city: meData.profile?.city, gender: meData.profile?.gender, age: meData.profile?.age,
         })
         setShowDailyBonus(true)
@@ -1952,6 +2116,7 @@ function HomeInner() {
       avatarUrl: meData.profile?.avatarUrl,
       paypalEmail: meData.profile?.paypalEmail,
       kycStatus: meData.kyc?.status ?? 'none',
+      subscriptions: meData.subscriptions ?? [],
       bio: meData.profile?.bio,
       birthday: meData.profile?.birthday,
       city: meData.profile?.city,
@@ -2023,6 +2188,7 @@ function HomeInner() {
           city: meData.profile?.city ?? u.city,
           gender: meData.profile?.gender ?? u.gender,
           age: meData.profile?.age ?? u.age,
+          subscriptions: meData.subscriptions ?? u.subscriptions,
         } : u)
       }).catch(() => {})
     }
