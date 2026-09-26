@@ -1,0 +1,40 @@
+{
+  "expo": {
+    "name": "Velantin Live",
+    "slug": "velantin-live",
+    "scheme": "velantin",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.velantin.live",
+      "infoPlist": {
+        "NSCameraUsageDescription": "Velantin needs camera access for live streaming.",
+        "NSMicrophoneUsageDescription": "Velantin needs microphone access for live audio.",
+        "UIBackgroundModes": ["audio", "remote-notification"]
+      }
+    },
+    "android": {
+      "adaptiveIcon": {
+        "backgroundColor": "#E6F4FE",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      },
+      "predictiveBackGestureEnabled": false,
+      "package": "com.velantin.live",
+      "permissions": ["CAMERA", "RECORD_AUDIO", "POST_NOTIFICATIONS"],
+      "intentFilters": [{ "action": "VIEW", "autoVerify": false, "data": [{ "scheme": "velantin", "host": "invite" }], "category": ["BROWSABLE", "DEFAULT"] }]
+    },
+    "plugins": [
+      ["expo-camera", { "cameraPermission": "Allow Velantin to use your camera for live streaming.", "microphonePermission": "Allow Velantin to use your microphone for live streaming." }],
+      ["expo-notifications", { "icon": "./assets/icon.png", "color": "#9f1239" }],
+      "expo-secure-store"
+    ],
+    "web": {
+      "favicon": "./assets/favicon.png"
+    }
+  }
+}

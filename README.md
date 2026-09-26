@@ -51,6 +51,14 @@ PayPal is the default coin-purchase and creator-cashout provider. Set `PAYMENTS_
 6. Create an Agora project, enable App Certificate, and add its App ID and certificate to Vercel.
 7. Deploy. The build command is `next build`; no database migration or WebSocket service is required.
 
+## Native Android/iOS project
+
+`mobile/` is a real Expo native project. Run `cd mobile && npm install`, then `npx expo prebuild` to generate `android/` and `ios/` projects. It includes native camera/microphone permissions, background audio/remote-notification modes, push-notification registration, `velantin://invite?ref=...` referral deep links, Sinhala/Tamil/English labels, and `expo-secure-store` token storage. No `google-services.json`, `GoogleService-Info.plist`, APNs key, signing certificate, or Firebase secret is committed. Add those from the Firebase console and configure APNs/Android notification credentials before a store build. iOS archive/signing requires macOS/Xcode; this Linux sandbox cannot produce a signed `.ipa`.
+
+## Replay recording status
+
+Ending a live stream creates durable replay metadata and gift moments in Firestore, and the replay player consumes a stored `videoUrl` when available. Actual video capture requires an Agora Cloud Recording job plus a provisioned durable Firebase Storage destination; the required customer credentials and bucket details are intentionally blank in the environment templates. Until those deployment-time values and a webhook/finalizer are configured, a replay may correctly show metadata but no playable video asset. Do not claim recording is live merely because a replay document exists.
+
 ## Security notes
 
 Firebase browser API keys are identifiers, not server secrets. Firebase Admin credentials, PayPal secrets, and the Agora App Certificate must never be placed in client-exposed variables or committed to Git. Wallet balances are changed only in server-side Firestore transactions; client-side live animations do not grant currency.

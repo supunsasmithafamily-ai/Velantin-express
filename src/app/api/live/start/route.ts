@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { FieldValue } from '@/lib/firebase-repo';
 import { findActiveFirebaseLiveStream } from '@/lib/firebase-repo';
 import { getFirebaseAdminFirestore } from '@/lib/firebase-admin';
+import { getFirebaseAdminMessaging } from '@/lib/firebase-admin';
 import { isNextResponse, requireUser } from '@/lib/session';
 import { isValidPrivateRoomPrice } from '@/lib/monetization';
 
@@ -26,6 +27,15 @@ export async function POST(request: NextRequest) {
     }
     const id = randomUUID();
     await firestore.collection('liveStreams').doc(id).set({ id, hostId: userId, title, status: 'active', accessType, entryPriceCoins, createdAt: FieldValue.serverTimestamp(), endedAt: null });
+    try {
+      const relationships = await firestore.collection('creatorRelationships').where('creatorId', '==', userId).where('following', '==', true).where('notify', '==', true).limit(500).get();
+      const tokens = (await Promise.all(relationships.docs.map(async relationship => {
+        const follower = await firestore.collection('users').doc(String(relationship.data().userId ?? '')).get();
+        const token = follower.data()?.fcmToken;
+        return typeof token === 'string' && token ? token : null;
+      }))).filter((token): token is string => Boolean(token));
+      if (tokens.length) await getFirebaseAdminMessaging().sendEachForMulticast({ tokens, notification: { title: `${userName} is live now`, body: title }, data: { type: 'creator_live', liveId: id, creatorId: userId } });
+    } catch (notificationError) { console.warn('live/start notification skipped:', notificationError); }
     return NextResponse.json({ id, title, hostId: userId, host: userName, accessType, entryPriceCoins });
   } catch (error) {
     console.error('live/start error:', error);

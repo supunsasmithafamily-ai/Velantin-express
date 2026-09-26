@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { FieldValue, getFirebaseLiveStream } from '@/lib/firebase-repo';
 import { getFirebaseAdminFirestore } from '@/lib/firebase-admin';
 import { isNextResponse, requireUser } from '@/lib/session';
+import { createReplay } from '@/lib/creator-features';
 
 export async function POST(request: NextRequest) {
   try {
@@ -14,6 +15,7 @@ export async function POST(request: NextRequest) {
     if (!stream) return NextResponse.json({ error: 'Live stream not found' }, { status: 404 });
     if (stream.hostId !== auth.userId) return NextResponse.json({ error: 'Only the host can end this stream' }, { status: 403 });
     await getFirebaseAdminFirestore().collection('liveStreams').doc(liveId).update({ status: 'ended', endedAt: FieldValue.serverTimestamp() });
+    await createReplay(liveId, auth.userId, String(stream.title ?? 'Live replay'));
     return NextResponse.json({ ok: true });
   } catch (error) {
     console.error('live/end error:', error);

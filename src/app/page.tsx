@@ -15,6 +15,19 @@ import {
   Shield as LucideShield,
   LogOut as LucideLogOut,
   Crown as LucideCrown,
+  Search as LucideSearch,
+  Bell as LucideBell,
+  Heart as LucideHeart,
+  BarChart3 as LucideBarChart3,
+  Gift as LucideGift,
+  Users as LucideUsers,
+  PlayCircle as LucidePlayCircle,
+  Copy as LucideCopy,
+  Languages as LucideLanguages,
+  Mic as LucideMic,
+  Video as LucideVideo,
+  Wifi as LucideWifi,
+  Film as LucideFilm,
 } from 'lucide-react'
 import { SUBSCRIPTION_PLANS } from '@/lib/monetization'
 
@@ -74,7 +87,7 @@ function diamondsToUsd(diamonds: number) {
 
 // ============ TYPES ============
 
-type Page = 'landing' | 'register' | 'home' | 'chats' | 'thread' | 'live' | 'liveStage' | 'status' | 'wallet' | 'subscriptions' | 'verify' | 'admin' | 'profile' | 'publicProfile'
+type Page = 'landing' | 'register' | 'home' | 'discover' | 'analytics' | 'referrals' | 'replays' | 'chats' | 'thread' | 'live' | 'liveStage' | 'status' | 'wallet' | 'subscriptions' | 'verify' | 'admin' | 'profile' | 'publicProfile'
 
 type NetUser = { id: string; name: string; email: string }
 type NetChat = { id: string; name: string; group: boolean; last: string; time: string; memberIds?: string[] }
@@ -200,6 +213,10 @@ function Shell({ page, setPage, threadChatId, setThreadChatId, user, setUser, ne
 }) {
   const navItems = [
     { to: 'home' as Page, label: 'Home', Icon: LucideHome },
+    { to: 'discover' as Page, label: 'Discover', Icon: LucideSearch },
+    { to: 'analytics' as Page, label: 'Analytics', Icon: LucideBarChart3 },
+    { to: 'referrals' as Page, label: 'Referrals', Icon: LucideUsers },
+    { to: 'replays' as Page, label: 'Replays', Icon: LucideFilm },
     { to: 'chats' as Page, label: 'Chats', Icon: LucideMessageCircle },
     { to: 'live' as Page, label: 'Live', Icon: LucideRadio },
     { to: 'wallet' as Page, label: 'Wallet', Icon: LucideWallet },
@@ -297,6 +314,10 @@ function Shell({ page, setPage, threadChatId, setThreadChatId, user, setUser, ne
       {/* Main stage */}
       <main style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>
         {page === 'home' && <HomePage netState={netState} user={user} goToLive={goToLive} goToProfile={goToProfile} />}
+        {page === 'discover' && <DiscoverPage netState={netState} user={user} goToLive={goToLive} />}
+        {page === 'analytics' && <AnalyticsPage user={user} />}
+        {page === 'referrals' && <ReferralsPage user={user} />}
+        {page === 'replays' && <ReplaysPage />}
         {page === 'publicProfile' && <PublicProfilePage basicUser={viewingProfile} setPage={setPage} />}
         {page === 'chats' && <ChatsPage netState={netState} user={user} setThreadChatId={setThreadChatId} setPage={setPage} />}
         {page === 'thread' && threadChatId && <ThreadPage chatId={threadChatId} netState={netState} user={user} />}
@@ -521,6 +542,96 @@ function HomePage({ netState, user, goToLive, goToProfile }: {
   )
 }
 
+
+const FEATURED_CREATORS = [
+  { id: 'maya', name: 'Maya Rose', handle: '@mayarose', category: 'Music', viewers: 18420, color: '#d946ef', avatar: 'M', title: 'Acoustic sunset sessions', tags: ['music', 'acoustic'], live: true },
+  { id: 'kavi', name: 'Kavi Kitchen', handle: '@kavikitchen', category: 'Food', viewers: 8920, color: '#f97316', avatar: 'K', title: 'Spicy street food tour', tags: ['food', 'travel'], live: true },
+  { id: 'nadi', name: 'Nadiya Fit', handle: '@nadiyafit', category: 'Fitness', viewers: 5210, color: '#14b8a6', avatar: 'N', title: '30 min no-equipment workout', tags: ['fitness', 'wellness'], live: false },
+  { id: 'sahan', name: 'Sahan Plays', handle: '@sahanplays', category: 'Gaming', viewers: 4130, color: '#6366f1', avatar: 'S', title: 'Rank push with the squad', tags: ['gaming', 'esports'], live: false },
+]
+
+function DiscoverPage({ netState, user, goToLive }: { netState: NetState; user: AuthUser; goToLive: (liveId: string) => void }) {
+  const [query, setQuery] = useState('')
+  const [category, setCategory] = useState('All')
+  const [language, setLanguage] = useState<'EN' | 'සිං' | 'தமி'>('EN')
+  const [following, setFollowing] = useState<string[]>(['maya'])
+  const [favorites, setFavorites] = useState<string[]>(['maya', 'nadi'])
+  const [notifications, setNotifications] = useState<string[]>(['maya'])
+  const [lowData, setLowData] = useState(false)
+  const [relationshipTab, setRelationshipTab] = useState<'all' | 'following' | 'favorites'>('all')
+  const [showNotifications, setShowNotifications] = useState(false)
+  const [recentlyWatched] = useState<string[]>(() => {
+    if (typeof window === 'undefined') return []
+    try {
+      const stored = JSON.parse(window.localStorage.getItem('ve-recently-watched') || '[]')
+      return Array.isArray(stored) ? stored.filter((id): id is string => typeof id === 'string') : []
+    } catch { return [] }
+  })
+  useEffect(() => {
+    authFetch('/api/creators/relationships').then(r => r.ok ? r.json() : null).then(data => {
+      const rows = Array.isArray(data?.relationships) ? data.relationships : []
+      setFollowing(rows.filter((row: { following?: boolean }) => row.following).map((row: { creatorId: string }) => row.creatorId))
+      setFavorites(rows.filter((row: { favorite?: boolean }) => row.favorite).map((row: { creatorId: string }) => row.creatorId))
+      setNotifications(rows.filter((row: { notify?: boolean }) => row.notify).map((row: { creatorId: string }) => row.creatorId))
+    }).catch(() => {})
+  }, [])
+  const categories = ['All', 'Music', 'Gaming', 'Food', 'Fitness', 'Travel']
+  const liveCards = FEATURED_CREATORS.filter(c => c.live || netState.lives.length === 0)
+  const filtered = FEATURED_CREATORS.filter(c => (category === 'All' || c.category === category) && (relationshipTab === 'all' || (relationshipTab === 'following' ? following.includes(c.id) : favorites.includes(c.id))) && (!query || `${c.name} ${c.title} ${c.tags.join(' ')}`.toLowerCase().includes(query.toLowerCase())))
+  const toggle = async (list: string[], setList: (next: string[]) => void, id: string, action: string) => {
+    const active = list.includes(id)
+    setList(active ? list.filter(x => x !== id) : [...list, id])
+    await authFetch('/api/creators/relationships', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ creatorId: id, action: active ? `un${action}` : action }) }).catch(() => {})
+  }
+  return (
+    <section className="ve-stage">
+      <div className="ve-topbar ve-discover-topbar">
+        <div><strong>{language === 'සිං' ? 'සොයන්න' : language === 'தமி' ? 'கண்டறியுங்கள்' : 'Discover'}</strong><span className="ve-muted"> · {netState.lives.length || 4} live now</span></div>
+        <div className="ve-discover-actions"><button className={`ve-icon-btn ve-light-icon${lowData ? ' active' : ''}`} title="Low-data mode" onClick={() => setLowData(!lowData)}><LucideWifi size={17} /></button><button className="ve-icon-btn ve-light-icon" title="Language" onClick={() => setLanguage(language === 'EN' ? 'සිං' : language === 'සිං' ? 'தமி' : 'EN')}><LucideLanguages size={17} /></button><div style={{ position: 'relative' }}><button className={`ve-icon-btn ve-light-icon${showNotifications ? ' active' : ''}`} title="Notifications" onClick={() => setShowNotifications(!showNotifications)}><LucideBell size={17} /><span className="ve-notification-dot" /></button>{showNotifications && <div className="ve-panel" style={{ position: 'absolute', right: 0, top: 44, width: 280, zIndex: 10, padding: 14 }}><strong>Live notifications</strong><p className="ve-muted" style={{ margin: '8px 0 0' }}>{notifications.length ? `${notifications.length} creator alert${notifications.length === 1 ? '' : 's'} enabled.` : 'Follow a creator and enable alerts to see them here.'}</p>{notifications.map(id => { const creator = FEATURED_CREATORS.find(c => c.id === id); return creator ? <div key={id} className="ve-mini-settings"><span><span className="ve-live-dot" /> {creator.name}</span><small>Live alerts on</small></div> : null })}</div>}</div></div>
+      </div>
+      <div className="ve-discover-content">
+        <div className="ve-discover-hero ve-panel"><div><span className="ve-kicker">{lowData ? 'Low-data mode on' : 'For you'}</span><h1>Find your next <em>favorite</em> creator.</h1><p>Live conversations, real people, and moments worth sharing.</p></div><div className="ve-hero-orb"><LucidePlayCircle size={30} /></div></div>
+        <div className="ve-search-wrap"><LucideSearch size={18} /><input value={query} onChange={e => setQuery(e.target.value)} placeholder="Search creators, streams, tags…" /></div>
+        <div className="ve-chip-row">{categories.map(c => <button key={c} className={`ve-chip${category === c ? ' active' : ''}`} onClick={() => setCategory(c)}>{c}</button>)}</div>
+        <div className="ve-section-heading"><div><span className="ve-kicker">Right now</span><h2>Trending live</h2></div><span className="ve-muted">Updated just now</span></div>
+        <div className="ve-trending-grid">{liveCards.slice(0, 4).map((c, index) => <div key={c.id} className="ve-stream-card" style={{ '--card-accent': c.color } as React.CSSProperties} onClick={() => netState.lives[index] && goToLive(netState.lives[index].id)}><div className="ve-stream-art"><span className="ve-stream-avatar" style={{ background: c.color }}>{c.avatar}</span><span className="ve-badge ve-live-badge"><span className="ve-live-dot" /> LIVE</span><span className="ve-viewer-count">{c.viewers.toLocaleString()} watching</span></div><div className="ve-stream-copy"><strong>{c.title}</strong><span>{c.name} · {c.category}</span><div className="ve-tag-row">{c.tags.map(t => <small key={t}>#{t}</small>)}</div></div></div>)}</div>
+        <div className="ve-section-heading"><div><span className="ve-kicker">Your circle</span><h2>Creators to follow</h2></div></div>
+        <div className="ve-chip-row"><button className={`ve-chip${relationshipTab === 'all' ? ' active' : ''}`} onClick={() => setRelationshipTab('all')}>All creators</button><button className={`ve-chip${relationshipTab === 'following' ? ' active' : ''}`} onClick={() => setRelationshipTab('following')}><LucideUsers size={14} /> Following ({following.length})</button><button className={`ve-chip${relationshipTab === 'favorites' ? ' active' : ''}`} onClick={() => setRelationshipTab('favorites')}><LucideHeart size={14} /> Favorites ({favorites.length})</button></div>
+        <div className="ve-creator-list">{filtered.map(c => <div key={c.id} className="ve-creator-row"><div className="ve-stream-avatar" style={{ background: c.color }}>{c.avatar}</div><div className="ve-creator-meta"><strong>{c.name} <span className="ve-verified">✓</span></strong><span>{c.handle} · {c.category}</span></div><button className={`ve-icon-btn ve-light-icon${favorites.includes(c.id) ? ' liked' : ''}`} title="Favorite creator" onClick={() => toggle(favorites, setFavorites, c.id, 'favorite')}><LucideHeart size={17} fill={favorites.includes(c.id) ? 'currentColor' : 'none'} /></button><button className={`ve-btn ${following.includes(c.id) ? 've-btn-following' : 've-btn-primary'}`} onClick={() => { toggle(following, setFollowing, c.id, 'follow'); if (!following.includes(c.id) && !notifications.includes(c.id)) { setNotifications([...notifications, c.id]); authFetch('/api/creators/relationships', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ creatorId: c.id, action: 'notify' }) }).catch(() => {}) } }}>{following.includes(c.id) ? 'Following' : 'Follow'}</button><button className={`ve-icon-btn ve-light-icon${notifications.includes(c.id) ? ' active' : ''}`} title="Notify when live" onClick={() => toggle(notifications, setNotifications, c.id, 'notify')}><LucideBell size={17} /></button></div>)}</div>
+        <div className="ve-two-col"><div className="ve-panel"><span className="ve-kicker">Keep watching</span><h3>Recently watched</h3>{(recentlyWatched.length ? recentlyWatched : ['maya', 'kavi']).map((id, index) => { const creator = FEATURED_CREATORS.find(c => c.id === id) || FEATURED_CREATORS[index]; return <div className="ve-history-item" key={`${creator.id}-${index}`}><div className={`ve-history-thumb${index ? ' orange' : ''}`} /><div><strong>{creator.title}</strong><span>{index ? '8 min watched · 2 days ago' : '12 min watched · yesterday'}</span></div><LucidePlayCircle size={18} /></div> })}</div><div className="ve-panel"><span className="ve-kicker">Personalized for you</span><h3>Favorites & recommendations</h3><p className="ve-muted">You are following <strong>{following.length}</strong> creators and getting live alerts for <strong>{notifications.length}</strong>. Recommendations adapt to your watch history and favorite categories.</p><div className="ve-mini-settings"><span><LucideVideo size={16} /> Mobile video quality</span><strong>{lowData ? 'Data saver' : 'Auto HD'}</strong></div><div className="ve-mini-settings"><span><LucideMic size={16} /> Background audio</span><strong className="ve-ok">Ready</strong></div></div></div>
+      </div>
+    </section>
+  )
+}
+
+function AnalyticsPage({ user }: { user: AuthUser }) {
+  const [range, setRange] = useState('This week')
+  const [report, setReport] = useState<{ totalViewers: number; peakViewers: number; watchTimeSeconds: number; giftCoins: number } | null>(null)
+  useEffect(() => { authFetch(`/api/creators/analytics?range=${range.toLowerCase().replace(' ', '-')}`).then(r => r.ok ? r.json() : null).then(data => setReport(data?.report ?? null)).catch(() => {}) }, [range])
+  const metrics = [{ label: 'Total viewers', value: report ? report.totalViewers.toLocaleString() : '—', change: 'Live data', icon: LucideUsers }, { label: 'Peak viewers', value: report ? report.peakViewers.toLocaleString() : '—', change: 'Live data', icon: LucideBarChart3 }, { label: 'Watch time', value: report ? `${Math.floor(report.watchTimeSeconds / 3600)}h ${Math.floor(report.watchTimeSeconds / 60) % 60}m` : '—', change: 'Live data', icon: LucidePlayCircle }, { label: 'Gift income', value: report ? report.giftCoins.toLocaleString() : '—', change: 'Coins', icon: LucideGift }]
+  return <section className="ve-stage"><div className="ve-topbar"><div><strong>Creator Analytics</strong><span className="ve-muted"> · {user.name}</span></div><select className="ve-select" value={range} onChange={e => setRange(e.target.value)}><option>This week</option><option>This month</option><option>Last 90 days</option></select></div><div className="ve-analytics-content"><div className="ve-analytics-kicker"><div><span className="ve-kicker">Creator studio</span><h1>Your audience is growing.</h1><p className="ve-muted">Track performance, income, and community health in one place.</p></div><button className="ve-btn ve-btn-primary">Download report</button></div><div className="ve-metric-grid">{metrics.map(m => <div className="ve-panel ve-metric-card" key={m.label}><div className="ve-metric-icon"><m.icon size={18} /></div><span>{m.label}</span><strong>{m.value}</strong><small className="ve-ok">{m.change} vs previous</small></div>)}</div><div className="ve-analytics-grid"><div className="ve-panel"><div className="ve-card-title"><div><span className="ve-kicker">Audience</span><h3>Viewers & watch time</h3></div><span className="ve-muted">{range}</span></div><div className="ve-chart"><div className="ve-chart-grid" /><svg viewBox="0 0 640 220" preserveAspectRatio="none"><defs><linearGradient id="area" x1="0" x2="0" y1="0" y2="1"><stop offset="0" stopColor="#fb7185" stopOpacity=".35" /><stop offset="1" stopColor="#fb7185" stopOpacity="0" /></linearGradient></defs><path d="M0 180 C70 170 85 100 150 125 S230 180 285 110 S370 95 420 120 S510 40 560 70 S610 55 640 25 V220 H0Z" fill="url(#area)" /><path d="M0 180 C70 170 85 100 150 125 S230 180 285 110 S370 95 420 120 S510 40 560 70 S610 55 640 25" fill="none" stroke="#fb7185" strokeWidth="4" /></svg></div><div className="ve-chart-labels"><span>Mon</span><span>Tue</span><span>Wed</span><span>Thu</span><span>Fri</span><span>Sat</span><span>Sun</span></div></div><div className="ve-panel"><span className="ve-kicker">Community</span><h3>Follower growth</h3><div className="ve-growth-number">+1,248</div><p className="ve-muted">New followers this period</p><div className="ve-progress"><span style={{ width: '72%' }} /></div><div className="ve-mini-settings"><span>Followers</span><strong>12,840</strong></div><div className="ve-mini-settings"><span>Returning viewers</span><strong>68%</strong></div><div className="ve-mini-settings"><span>Avg. session</span><strong>24m 18s</strong></div></div></div><div className="ve-panel"><div className="ve-card-title"><div><span className="ve-kicker">Monetization</span><h3>Income breakdown</h3></div><span className="ve-muted">Coins</span></div><div className="ve-income-row"><span><i className="ve-income-dot gifts" /> Gifts</span><strong>12,920</strong><b>70%</b></div><div className="ve-income-row"><span><i className="ve-income-dot subs" /> Subscriptions</span><strong>4,180</strong><b>23%</b></div><div className="ve-income-row"><span><i className="ve-income-dot referral" /> Referral commission</span><strong>1,360</strong><b>7%</b></div></div></div></section>
+}
+
+function ReferralsPage({ user }: { user: AuthUser }) {
+  const [copied, setCopied] = useState(false)
+  const [tab, setTab] = useState('Overview')
+  const [referral, setReferral] = useState<{ code?: string; successfulReferrals?: number; coinsEarned?: number; commissionCoins?: number } | null>(null)
+  useEffect(() => { authFetch('/api/referrals').then(r => r.ok ? r.json() : null).then(data => setReferral(data?.referral ?? null)).catch(() => {}) }, [])
+  const invite = `velantin.live/invite/${referral?.code ?? (user.name.toLowerCase().replace(/[^a-z0-9]+/g, '-') || 'creator')}`
+  const copyInvite = async () => { try { await navigator.clipboard.writeText(`https://${invite}`) } catch {} setCopied(true); setTimeout(() => setCopied(false), 1600) }
+  return <section className="ve-stage"><div className="ve-topbar"><div><strong>Referral Center</strong><span className="ve-muted"> · Grow together</span></div><span className="ve-badge">{referral?.coinsEarned ?? 0} coins earned</span></div><div className="ve-referral-content"><div className="ve-referral-hero ve-panel"><div><span className="ve-kicker">Invite friends, earn together</span><h1>Turn your community into momentum.</h1><p>Give new creators a warm welcome and earn coins for every successful referral.</p></div><div className="ve-referral-illustration"><LucideUsers size={42} /></div></div><div className="ve-invite-card ve-panel"><div><span className="ve-kicker">Your invite link</span><h3>{invite}</h3></div><button className="ve-btn ve-btn-primary" onClick={copyInvite}><LucideCopy size={16} /> {copied ? 'Copied!' : 'Copy link'}</button></div><div className="ve-referral-tabs">{['Overview', 'Your invites', 'Creator commission'].map(t => <button key={t} className={tab === t ? 'active' : ''} onClick={() => setTab(t)}>{t}</button>)}</div><div className="ve-referral-stats"><div className="ve-panel"><span>Successful referrals</span><strong>{referral?.successfulReferrals ?? 0}</strong><small className="ve-ok">Tracked automatically</small></div><div className="ve-panel"><span>Coins earned</span><strong>{referral?.coinsEarned ?? 0}</strong><small>56 coins per referral</small></div><div className="ve-panel"><span>Creator commission</span><strong>{referral?.commissionCoins ?? 0}</strong><small>Commission coins</small></div></div><div className="ve-panel ve-steps"><h3>How it works</h3><div><b>01</b><span><strong>Share your link</strong><small>Send your invite to friends or your social community.</small></span></div><div><b>02</b><span><strong>They go live</strong><small>Your referral joins, completes their profile, and starts streaming.</small></span></div><div><b>03</b><span><strong>You both win</strong><small>Coins land in your wallet and creator commission starts automatically.</small></span></div></div></div></section>
+}
+
+function ReplaysPage() {
+  const [replays, setReplays] = useState<Array<{ id: string; title: string; views: number; durationSeconds: number; moments: number; clips: number; videoUrl?: string; createdAt?: string }>>([])
+  const [loading, setLoading] = useState(true)
+  const [selected, setSelected] = useState<{ id: string; title: string; videoUrl?: string; moments: number; clips: number } | null>(null)
+  useEffect(() => {
+    authFetch('/api/live/replays').then(r => r.ok ? r.json() : null).then(data => setReplays(Array.isArray(data?.replays) ? data.replays : [])).catch(() => {}).finally(() => setLoading(false))
+  }, [])
+  return <section className="ve-stage"><div className="ve-topbar"><div><strong>Replay library</strong><span className="ve-muted"> · Gift moments & short clips</span></div><span className="ve-badge"><LucideFilm size={14} /> Watch anytime</span></div><div className="ve-discover-content"><div className="ve-discover-hero ve-panel"><div><span className="ve-kicker">Your live memories</span><h1>Replay the moments that <em>moved</em> you.</h1><p>Every completed stream becomes a replay, with gift-sent moments ready to revisit and turn into clips.</p></div><div className="ve-hero-orb"><LucidePlayCircle size={30} /></div></div>{loading && <div className="ve-panel ve-muted">Loading replays…</div>}{!loading && replays.length === 0 && <div className="ve-panel"><h3>No replays yet</h3><p className="ve-muted">Start and finish a live stream to build your replay library.</p></div>}<div className="ve-trending-grid">{replays.map(replay => <article className="ve-stream-card" key={replay.id}><div className="ve-stream-art"><span className="ve-stream-avatar" style={{ background: '#be123c' }}><LucidePlayCircle size={24} /></span><span className="ve-badge ve-live-badge">REPLAY</span><span className="ve-viewer-count">{replay.views.toLocaleString()} views</span></div><div className="ve-stream-copy"><strong>{replay.title}</strong><span>{replay.durationSeconds ? `${Math.round(replay.durationSeconds / 60)} min` : 'Full live replay'}</span><div className="ve-tag-row"><small><LucideGift size={13} /> {replay.moments} gift moments</small><small><LucideFilm size={13} /> {replay.clips} clips</small></div><button className="ve-btn ve-btn-primary" style={{ marginTop: 12 }} onClick={() => setSelected(replay)}><LucidePlayCircle size={15} /> Play replay</button></div></article>)}</div></div>{selected && <div style={{ position: 'fixed', inset: 0, zIndex: 20, background: 'rgba(0,0,0,.8)', display: 'grid', placeItems: 'center', padding: 20 }} onClick={() => setSelected(null)}><div className="ve-panel" style={{ width: 'min(860px, 100%)' }} onClick={e => e.stopPropagation()}><div className="ve-card-title"><div><span className="ve-kicker">Replay</span><h3>{selected.title}</h3></div><button className="ve-btn" onClick={() => setSelected(null)}>Close</button></div>{selected.videoUrl ? <video src={selected.videoUrl} controls autoPlay style={{ width: '100%', borderRadius: 14, background: '#000', maxHeight: '65vh' }} /> : <div className="ve-panel" style={{ marginTop: 12, textAlign: 'center' }}><LucideFilm size={36} /><p className="ve-muted">This replay has no video asset attached yet. Gift moments: {selected.moments} · Short clips: {selected.clips}.</p></div>}</div></div>}</section>
+}
+
 function PublicProfilePage({ basicUser, setPage }: {
   basicUser: { id: string; name: string; avatarUrl: string | null; city: string | null } | null
   setPage: (p: Page) => void
@@ -721,6 +832,10 @@ function LiveStagePage({ netState, user, setPage, refreshUser }: {
   const [unlockedRoomId, setUnlockedRoomId] = useState<string | null>(null)
   const [accessError, setAccessError] = useState<string | null>(null)
   const [unlocking, setUnlocking] = useState(false)
+  const [micEnabled, setMicEnabled] = useState(true)
+  const [cameraEnabled, setCameraEnabled] = useState(true)
+  const [lowDataMode, setLowDataMode] = useState(false)
+  const [backgroundAudio, setBackgroundAudio] = useState(false)
   const accessReady = Boolean(live && (isHost || (live.accessType ?? 'public') === 'public' || unlockedRoomId === liveId))
 
   // Agora RTC (video) + RTM (chat/gifts) clients live in refs so they
@@ -827,6 +942,15 @@ function LiveStagePage({ netState, user, setPage, refreshUser }: {
     rtmRef.current.publish(liveId, JSON.stringify(msg)).catch(() => {})
     setComments(c => [...c.slice(-40), { user: msg.user, text: msg.text }])
     setText('')
+  }
+
+  async function toggleMedia(kind: 'mic' | 'camera') {
+    const track = kind === 'mic' ? localTracksRef.current?.[0] : localTracksRef.current?.[1]
+    if (!track) return
+    const next = kind === 'mic' ? !micEnabled : !cameraEnabled
+    await track.setEnabled(next)
+    if (kind === 'mic') setMicEnabled(next)
+    else setCameraEnabled(next)
   }
 
   async function sendGift(g: { id: string; name: string; coins: number; icon: string }) {
@@ -943,7 +1067,7 @@ function LiveStagePage({ netState, user, setPage, refreshUser }: {
   return (
     <section className="ve-stage ve-live-fullscreen">
       <div className="ve-live-frame ve-live-frame-full">
-        <video ref={videoRef} autoPlay playsInline style={{ width: '100%', height: '100%', objectFit: 'cover', background: '#000' }} />
+        <video ref={videoRef} autoPlay playsInline style={{ width: '100%', height: '100%', objectFit: 'cover', background: '#000', display: backgroundAudio ? 'none' : 'block' }} />
         <div className="ve-live-overlay">
           <div className="ve-live-top">
             <button className="ve-icon-btn" aria-label="Back" onClick={() => setPage('live')}>←</button>
@@ -953,11 +1077,12 @@ function LiveStagePage({ netState, user, setPage, refreshUser }: {
               <button className="ve-icon-btn ve-icon-btn-primary" type="submit" aria-label="Send">➤</button>
             </form>
             {isHost && (
-              <button className="ve-icon-btn ve-icon-btn-danger" aria-label="End live" onClick={() => {
+              <><button className="ve-icon-btn" aria-label="Toggle microphone" title={micEnabled ? 'Mute microphone' : 'Unmute microphone'} onClick={() => toggleMedia('mic')}>{micEnabled ? <LucideMic size={16} /> : '🔇'}</button><button className="ve-icon-btn" aria-label="Toggle camera" title={cameraEnabled ? 'Turn camera off' : 'Turn camera on'} onClick={() => toggleMedia('camera')}>{cameraEnabled ? <LucideVideo size={16} /> : '📵'}</button><button className={`ve-icon-btn${lowDataMode ? ' active' : ''}`} aria-label="Low-data mode" title="Low-data streaming mode" onClick={() => setLowDataMode(!lowDataMode)}><LucideWifi size={16} /></button><button className="ve-icon-btn ve-icon-btn-danger" aria-label="End live" onClick={() => {
                 authFetch('/api/live/end', { method: 'POST', body: JSON.stringify({ liveId: live.id }) }).catch(() => {})
                 setPage('live')
-              }}>✕</button>
+              }}>✕</button></>
             )}
+            {!isHost && <button className={`ve-icon-btn${backgroundAudio ? ' active' : ''}`} aria-label="Background audio" title="Background audio" onClick={() => setBackgroundAudio(!backgroundAudio)}><LucideMic size={16} /></button>}
           </div>
 
           <div className="ve-live-comments">
@@ -1985,7 +2110,7 @@ class AppErrorBoundary extends Component<{ children: ReactNode }, { error: Error
           <p style={{ opacity: 0.6, marginTop: 16 }}>Component stack:{this.state.info}</p>
           <button
             style={{ marginTop: 16, padding: '10px 20px', background: '#e11d48', color: '#fff', border: 'none', borderRadius: 8 }}
-            onClick={() => { this.setState({ error: null, info: '' }); window.location.href = '/' }}
+            onClick={() => { this.setState({ error: null, info: '' }); window.location.reload() }}
           >
             Reload app
           </button>

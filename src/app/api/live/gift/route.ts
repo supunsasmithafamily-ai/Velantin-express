@@ -4,6 +4,7 @@ import { FieldValue } from '@/lib/firebase-repo';
 import { getFirebaseAdminFirestore } from '@/lib/firebase-admin';
 import { isNextResponse, requireUser } from '@/lib/session';
 import { canAccessFirebaseLiveStream } from '@/lib/firebase-repo';
+import { recordGiftMoment } from '@/lib/creator-features';
 
 const GIFT_CATALOG: Record<string, { name: string; coins: number }> = {
   rose: { name: 'Rose', coins: 10 }, heart: { name: 'Heart', coins: 25 }, kiss: { name: 'Kiss', coins: 40 }, letter: { name: 'Love Letter', coins: 60 }, bouquet: { name: 'Bouquet', coins: 120 }, teddy: { name: 'Teddy Bear', coins: 180 }, chocolate: { name: 'Chocolate Box', coins: 220 }, spotlight: { name: 'Spotlight', coins: 300 }, fireworks: { name: 'Fireworks', coins: 500 }, ring: { name: 'Diamond Ring', coins: 700 }, crown: { name: 'Crown', coins: 900 },
@@ -53,6 +54,7 @@ export async function POST(request: NextRequest) {
       }
       transaction.set(firestore.collection('liveGifts').doc(giftRecordId), { id: giftRecordId, streamId: liveId, senderId: auth.userId, senderName: fromName, giftName: gift.name, coins: gift.coins, diamonds, createdAt: FieldValue.serverTimestamp() });
     });
+    await recordGiftMoment({ liveId, streamId: liveId, senderId: auth.userId, senderName: fromName, hostId, giftName: gift.name, coins: gift.coins, diamonds });
     return NextResponse.json({ ok: true, giftId: giftRecordId, giftName: gift.name, coins: gift.coins, diamonds, fromName });
   } catch (error) {
     if (error instanceof Error && error.message === 'INSUFFICIENT_COINS') return NextResponse.json({ error: 'Insufficient coins' }, { status: 400 });
